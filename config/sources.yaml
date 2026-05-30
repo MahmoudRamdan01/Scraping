@@ -1,0 +1,101 @@
+# Data sources. Each entry maps a scraper key to its module + collection policy.
+# tier:    green  = easy, public, compliant (shipped ON)
+#          yellow = harder business listings, best-effort (shipped ON, may fail gracefully)
+#          deferred = RED zone, ToS/legal risk (shipped OFF, behind a feature flag)
+# enabled: whether it appears in the UI by default
+# requires_flag: name of FEATURE_* env flag that must be true to load it (deferred only)
+# rate_limit: polite delay window (seconds) between requests
+
+sources:
+  dummy:
+    label: "Demo data (offline)"
+    module: aol_leadfinder.scrapers.dummy
+    tier: green
+    enabled: true
+    rate_limit: {min: 0.0, max: 0.0}
+
+  egydir:
+    label: "EgyDir (egydir.com)"
+    module: aol_leadfinder.scrapers.green.egydir
+    tier: green
+    enabled: true
+    base_url: "https://www.egydir.com"
+    rate_limit: {min: 2.0, max: 5.0}
+
+  kompass_eg:
+    label: "Kompass Egypt (eg.kompass.com)"
+    module: aol_leadfinder.scrapers.green.kompass_eg
+    tier: green
+    enabled: false   # stub — implement parser then flip to true
+    base_url: "https://eg.kompass.com"
+    rate_limit: {min: 2.0, max: 5.0}
+
+  freightclub:
+    label: "Freight Club Directory (freightclub.net)"
+    module: aol_leadfinder.scrapers.green.freightclub
+    tier: green
+    enabled: false   # stub — implement parser then flip to true
+    base_url: "https://freightclub.net"
+    rate_limit: {min: 2.0, max: 5.0}
+
+  wsdconnect:
+    label: "World Shipping Directory (wsdconnect.com)"
+    module: aol_leadfinder.scrapers.green.wsdconnect
+    tier: green
+    enabled: false   # implemented in a later step; placeholder
+    base_url: "https://wsdconnect.com"
+    rate_limit: {min: 2.0, max: 5.0}
+
+  forwarding_companies:
+    label: "Forwarding Companies (forwardingcompanies.com)"
+    module: aol_leadfinder.scrapers.green.forwarding_companies
+    tier: green
+    enabled: false   # implemented in a later step; placeholder
+    base_url: "https://forwardingcompanies.com"
+    rate_limit: {min: 2.0, max: 5.0}
+
+  google_maps:
+    label: "Google Maps (business listings)"
+    module: aol_leadfinder.scrapers.yellow.google_maps
+    tier: yellow
+    enabled: false   # Phase 2 — needs Playwright + browsers installed
+    rate_limit: {min: 3.0, max: 7.0}
+
+  yellowpages_eg:
+    label: "Yellow Pages Egypt (yellowpages.com.eg)"
+    module: aol_leadfinder.scrapers.yellow.yellowpages_eg
+    tier: yellow
+    enabled: false   # Phase 2 — Cloudflare protected, best-effort
+    rate_limit: {min: 4.0, max: 8.0}
+
+  facebook:
+    label: "Facebook (DEFERRED — ToS risk)"
+    module: aol_leadfinder.scrapers.deferred.facebook
+    tier: deferred
+    enabled: false
+    requires_flag: FEATURE_FACEBOOK
+    rate_limit: {min: 5.0, max: 12.0}
+
+  instagram:
+    label: "Instagram (DEFERRED — ToS risk)"
+    module: aol_leadfinder.scrapers.deferred.instagram
+    tier: deferred
+    enabled: false
+    requires_flag: FEATURE_INSTAGRAM
+    rate_limit: {min: 5.0, max: 12.0}
+
+  linkedin:
+    label: "LinkedIn (DEFERRED — ToS risk)"
+    module: aol_leadfinder.scrapers.deferred.linkedin
+    tier: deferred
+    enabled: false
+    requires_flag: FEATURE_LINKEDIN
+    rate_limit: {min: 6.0, max: 15.0}
+
+  truecaller:
+    label: "Truecaller enrichment (DEFERRED — ToS risk)"
+    module: aol_leadfinder.scrapers.deferred.truecaller
+    tier: deferred
+    enabled: false
+    requires_flag: FEATURE_TRUECALLER
+    rate_limit: {min: 6.0, max: 15.0}

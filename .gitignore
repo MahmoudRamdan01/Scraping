@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# App data (never commit leads / secrets / browser profiles)
+data/
+*.db
+*.sqlite3
+exports/
+pw_profile/
+
+# Secrets
+.env
+*.creds.json
+google_service_account.json
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

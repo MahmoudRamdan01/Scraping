@@ -1,0 +1,26 @@
+# ---- Core runtime (needed for the pipeline + tests) ----
+sqlmodel>=0.0.16
+pandas>=2.0
+openpyxl>=3.1
+phonenumbers>=8.13
+PyYAML>=6.0
+beautifulsoup4>=4.12
+lxml>=5.0
+requests>=2.31
+python-dotenv>=1.0
+
+# ---- UI ----
+streamlit>=1.36
+
+# ---- Scraping (YELLOW tier: Google Maps / Yellow Pages) ----
+# Browsers installed separately via: playwright install chromium
+playwright>=1.44
+playwright-stealth>=1.0.6
+
+# ---- Google Sheets sync (optional) ----
+gspread>=6.0
+google-auth>=2.30
+
+# ---- Dev / test ----
+pytest>=8.0
+ruff>=0.5

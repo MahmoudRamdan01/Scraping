@@ -1,0 +1,38 @@
+# Business categories the sales team targets.
+# Add a new category by appending an entry here (no code change needed) —
+# or use the ➕ form on the Settings page in the app.
+# Each category has Arabic + English keywords used to build search queries.
+
+categories:
+  - name: Cosmetics
+    keywords: ["مستحضرات تجميل", "كوزمتيك", "cosmetics", "makeup", "skincare"]
+  - name: Perfumes
+    keywords: ["عطور", "برفان", "perfumes", "fragrance"]
+  - name: Pharmaceuticals
+    keywords: ["شركة أدوية", "مستحضرات دوائية", "pharmaceutical", "pharma"]
+  - name: Home Appliances
+    keywords: ["أدوات منزلية", "أجهزة منزلية", "home appliances", "houseware"]
+  - name: Gift Shops
+    keywords: ["محل هدايا", "هدايا", "gift shop", "gifts"]
+  - name: Clothing
+    keywords: ["ملابس", "أزياء", "clothing", "apparel"]
+  - name: Fashion Brands
+    keywords: ["براند ملابس", "fashion brand", "fashion"]
+  - name: Furniture
+    keywords: ["أثاث", "موبيليا", "furniture"]
+  - name: Electronics
+    keywords: ["إلكترونيات", "أجهزة كهربائية", "electronics"]
+  - name: Food Suppliers
+    keywords: ["موردين أغذية", "مواد غذائية", "food supplier", "food distributor"]
+  - name: Medical Supplies
+    keywords: ["مستلزمات طبية", "أجهزة طبية", "medical supplies", "medical devices"]
+  - name: Factories
+    keywords: ["مصنع", "مصانع", "factory", "manufacturer"]
+  - name: Import & Export
+    keywords: ["استيراد وتصدير", "import export", "trading"]
+  - name: Wholesalers
+    keywords: ["تاجر جملة", "جملة", "wholesale", "wholesaler"]
+  - name: Distributors
+    keywords: ["موزع", "توزيع", "distributor", "distribution"]
+  - name: Freight Forwarder
+    keywords: ["شحن دولي", "تخليص جمركي", "freight forwarder", "logistics", "customs clearance"]

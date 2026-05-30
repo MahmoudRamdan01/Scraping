@@ -1,0 +1,20 @@
+# Quality filters from the sales team's rules. A lead is DROPPED if it fails any
+# enabled filter. All thresholds are configurable here (no code change needed).
+
+# Drop leads whose last known activity year is at or before this cutoff.
+# (e.g. in 2026 we drop pages last active in 2021/2022.)
+activity:
+  enabled: true
+  drop_if_year_at_or_before: 2023
+  drop_if_activity_unknown: false   # keep leads with no activity date (score handles it)
+
+# Drop pages with very small audiences (only applied when follower data exists).
+followers:
+  enabled: true
+  min: 1000
+
+# A usable lead must have a phone number.
+require_phone: true
+
+# Focus on organized companies: require a website/page. Set false to relax.
+require_website: true
