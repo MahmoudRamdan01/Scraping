@@ -13,12 +13,14 @@ from typing import Optional
 from sqlmodel import Session
 
 from ..config import Settings, get_filters, get_scoring, get_settings
+from ..enrichment.intelligence import analyze_website_html
 from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
 from ..pipeline.normalize import normalize_lead
 from ..pipeline.score import score_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
+from ..scrapers.http import extract_emails_from_html, fetch_html
 from ..storage.db import get_engine, init_db, upsert_lead
 from ..storage.models import Run
 
@@ -40,6 +42,24 @@ class RunStats:
         self.dropped += 1
         key = reason or "unknown"
         self.drop_reasons[key] = self.drop_reasons.get(key, 0) + 1
+
+
+def _enrich_website(norm) -> None:
+    """Best-effort: crawl the lead's website -> company type + shipping intent."""
+    try:
+        html = fetch_html(norm.website)
+    except Exception as exc:  # noqa: BLE001 - enrichment never breaks a run
+        log.debug("enrichment failed for %s: %s", norm.website, exc)
+        return
+    intel = analyze_website_html(html, norm.category)
+    norm.company_type = intel.company_type
+    norm.shipping_intent = intel.shipping_intent
+    if intel.has_online_store:
+        norm.has_online_store = True
+    if not norm.email:
+        emails = extract_emails_from_html(html)
+        if emails:
+            norm.email = emails[0]
 
 
 def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional[Settings] = None) -> RunStats:
@@ -80,6 +100,8 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
                     if not ok:
                         stats.drop(reason)
                         continue
+                    if req.enrich_websites and norm.website:
+                        _enrich_website(norm)
                     score, tier, reasons = score_lead(norm, scoring)
                     norm.score, norm.tier, norm.score_reasons = score, tier, reasons
                     _, created = upsert_lead(session, norm, run.id)

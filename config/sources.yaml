@@ -43,8 +43,9 @@ sources:
     label: "World Shipping Directory (wsdconnect.com)"
     module: aol_leadfinder.scrapers.green.wsdconnect
     tier: green
-    enabled: false   # implemented in a later step; placeholder
+    enabled: true   # REAL source — listing has website+email, phone from detail page
     base_url: "https://wsdconnect.com"
+    page_param: page
     rate_limit: {min: 2.0, max: 5.0}
 
   forwarding_companies:

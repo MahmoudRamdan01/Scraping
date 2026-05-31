@@ -30,6 +30,7 @@ Search (country / city / category / sources)
   → dedup / upsert (no duplicates across re-runs)
   → filter (drop inactive / low-followers / no-phone / no-website)
   → score (0–100 → Hot / Medium / Weak, with an explainable breakdown)
+  → (opt) enrich: crawl website → company type + shipping-intent (Company Intelligence)
   → store (SQLite) → display (grid) → CRM (status · follow-ups · assigned-to) → export (Excel / Google Sheet)
   → Dashboard (pipeline stages · conversion rate · follow-ups due)
 ```
@@ -38,7 +39,7 @@ Search (country / city / category / sources)
 
 | Tier | Sources | Status |
 |---|---|---|
-| 🟢 **green** | Freight Club ✅ *(real data)* · WSD Connect · Forwarding Companies *(wired)* · EgyDir *(selectors need live-verify — disabled)* · Kompass EG *(403 → needs Playwright)* | public business directories — easy & compliant |
+| 🟢 **green** | Freight Club ✅ · WSD Connect ✅ *(+website/email, phone via detail)* · Forwarding Companies *(wired)* · EgyDir *(needs live-verify — disabled)* · Kompass EG *(403 → Playwright)* | public business directories — easy & compliant |
 | 🟡 **yellow** | Google Maps, Yellow Pages EG | harder (Playwright + stealth), Phase 2, best-effort |
 | 🔴 **deferred** | Facebook, Instagram, LinkedIn, Truecaller | **OFF by default**, ToS/legal risk — see below |
 
@@ -115,8 +116,8 @@ Enabling them is opt-in and **at your own legal/operational risk**. Compliant al
 ## Roadmap (v2 — CRM-first)
 
 - **Sprint 1 (done):** CRM workflow (stages · follow-ups · assigned-to) + "Why this lead" + **Freight Club** real source + seed Dashboard + WhatsApp manual (`docs/WHATSAPP_MANUAL_AR.md`).
-- **Sprint 2:** more freight sources (WSD Connect, Forwarding Companies — phone on detail pages) + verify/fix EgyDir live selectors.
-- **Sprint 3:** Company Intelligence Engine — crawl site → classify (Importer/Exporter/Manufacturer/Distributor/Ecommerce/Forwarder) → Shipping Intent Score.
+- **Sprint 2 (done):** WSD Connect source (website + email + detail-page phone) + shared crawl primitives (`scrapers/http.py`). *(Forwarding Companies + EgyDir live-verify still pending.)*
+- **Sprint 3 (done):** Company Intelligence Engine (`enrichment/intelligence.py`) — crawl site → classify (Importer/Exporter/Manufacturer/Distributor/Ecommerce/Forwarder) → **Shipping Intent Score** (opt-in toggle on Search; shown in Leads + Dashboard).
 - **Sprint 4:** Google Maps (Playwright + stealth) + Kompass via Playwright (403).
 - **Sprint 5:** full management Dashboard + Google Sheets improvements + advanced scoring.
 - **Deferred (OFF):** Facebook/Instagram/LinkedIn/Truecaller + WhatsApp automation.

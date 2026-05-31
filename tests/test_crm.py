@@ -27,7 +27,10 @@ def test_ensure_columns_migrates_old_schema():
         )
     _ensure_columns(engine)
     cols = {c["name"] for c in inspect(engine).get_columns("lead")}
-    assert {"score_reasons", "assigned_to", "last_contact_date", "next_followup_date"} <= cols
+    assert {
+        "score_reasons", "assigned_to", "last_contact_date", "next_followup_date",
+        "company_type", "shipping_intent",
+    } <= cols
     # Idempotent: running again is a no-op (no error)
     _ensure_columns(engine)
 

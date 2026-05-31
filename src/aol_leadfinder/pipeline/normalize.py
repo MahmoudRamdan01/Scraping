@@ -80,6 +80,8 @@ class NormalizedLead:
     rating: Optional[float] = None
     branches: Optional[int] = None
     has_online_store: Optional[bool] = None
+    company_type: Optional[str] = None
+    shipping_intent: Optional[int] = None
     score: int = 0
     tier: str = "Weak"
     score_reasons: list = field(default_factory=list)

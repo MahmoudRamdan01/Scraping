@@ -14,6 +14,8 @@ _COLUMNS = [
     ("email", "Email"),
     ("website", "Website"),
     ("category", "Category"),
+    ("company_type", "Type"),
+    ("shipping_intent", "Shipping Intent"),
     ("city", "City"),
     ("governorate", "Governorate"),
     ("country", "Country"),
@@ -24,6 +26,8 @@ _COLUMNS = [
     ("score", "Score"),
     ("tier", "Tier"),
     ("status", "Status"),
+    ("assigned_to", "Assigned To"),
+    ("next_followup_date", "Next Follow-up"),
     ("source", "Source"),
     ("source_url", "Source URL"),
 ]

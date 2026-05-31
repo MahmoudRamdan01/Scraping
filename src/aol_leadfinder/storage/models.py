@@ -63,6 +63,9 @@ class Lead(SQLModel, table=True):
     branches: Optional[int] = None
     has_online_store: Optional[bool] = None
 
+    company_type: Optional[str] = None
+    shipping_intent: Optional[int] = None
+
     score: int = 0
     tier: str = "Weak"
     score_reasons: Optional[list] = Field(default=None, sa_column=Column(JSON))

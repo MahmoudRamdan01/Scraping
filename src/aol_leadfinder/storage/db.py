@@ -26,6 +26,8 @@ _MIGRATION_COLUMNS = {
     "assigned_to": "TEXT",
     "last_contact_date": "DATE",
     "next_followup_date": "DATE",
+    "company_type": "TEXT",
+    "shipping_intent": "INTEGER",
 }
 
 # CRM fields editable from the UI.
@@ -90,6 +92,10 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         existing.score = n.score
         existing.tier = n.tier
         existing.score_reasons = n.score_reasons or None
+        if n.company_type:
+            existing.company_type = n.company_type
+        if n.shipping_intent is not None:
+            existing.shipping_intent = n.shipping_intent
         existing.updated_at = datetime.utcnow()
         session.add(existing)
         return existing, False
@@ -116,6 +122,8 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         rating=n.rating,
         branches=n.branches,
         has_online_store=n.has_online_store,
+        company_type=n.company_type,
+        shipping_intent=n.shipping_intent,
         score=n.score,
         tier=n.tier,
         score_reasons=(n.score_reasons or None),

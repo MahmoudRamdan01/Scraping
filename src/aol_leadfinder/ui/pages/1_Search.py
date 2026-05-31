@@ -31,6 +31,10 @@ country = col1.text_input("Country / الدولة", "Egypt")
 city = col2.text_input("City / المدينة / المحافظة", "Alexandria")
 category = col3.selectbox("Category / المجال", category_names)
 max_results = st.slider("أقصى عدد نتائج لكل مصدر / Max results per source", 10, 500, 100, 10)
+enrich = st.checkbox(
+    "🔎 حلّل مواقع الشركات (Company Intelligence) — أبطأ، بيقيّم نوع الشركة ونية الشحن",
+    value=False,
+)
 
 sources = registry.available_sources()
 if not sources:
@@ -52,7 +56,8 @@ if st.button("🚀 ابدأ البحث / Run", type="primary"):
         st.stop()
     keywords = next((c.get("keywords", []) for c in categories if c["name"] == category), [])
     req = SearchRequest(
-        country=country, city=city, category=category, keywords=keywords, max_results=max_results
+        country=country, city=city, category=category, keywords=keywords,
+        max_results=max_results, enrich_websites=enrich,
     )
     with st.spinner("بنجمع الداتا ونفلترها ونقيّمها..."):
         stats = run_search(req, selected)

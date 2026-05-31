@@ -24,6 +24,7 @@ class SearchRequest:
     category: Optional[str] = None
     keywords: list[str] = field(default_factory=list)
     max_results: int = 100
+    enrich_websites: bool = False
 
 
 @dataclass

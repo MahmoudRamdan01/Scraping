@@ -62,6 +62,8 @@ for lead in leads:
             "Score": lead.score,
             "Tier": lead.tier,
             "Why": format_reasons(lead.score_reasons),
+            "Type": lead.company_type or "",
+            "Intent": lead.shipping_intent,
             "Status": STATUS_LABELS_AR.get(lead.status, lead.status),
             "Assigned To": lead.assigned_to or "",
             "Last Contact": lead.last_contact_date,
@@ -101,11 +103,12 @@ edited = st.data_editor(
         "id": None,
         "Why": st.column_config.TextColumn("Why", help="ليه السكور ده؟"),
         "Score": st.column_config.NumberColumn("Score"),
+        "Intent": st.column_config.NumberColumn("Intent", help="نية الشحن 0-100"),
         "Status": st.column_config.SelectboxColumn("Status", options=_STATUS_LABELS),
         "Last Contact": st.column_config.DateColumn("Last Contact"),
         "Next Follow-up": st.column_config.DateColumn("Next Follow-up"),
     },
-    disabled=["Company", "Phone", "City", "Category", "Score", "Tier", "Why"],
+    disabled=["Company", "Phone", "City", "Category", "Score", "Tier", "Why", "Type", "Intent"],
     key="leads_editor",
 )
 
