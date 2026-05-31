@@ -80,8 +80,8 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
                     if not ok:
                         stats.drop(reason)
                         continue
-                    score, tier, _ = score_lead(norm, scoring)
-                    norm.score, norm.tier = score, tier
+                    score, tier, reasons = score_lead(norm, scoring)
+                    norm.score, norm.tier, norm.score_reasons = score, tier, reasons
                     _, created = upsert_lead(session, norm, run.id)
                     stats.kept += 1
                     stats.created += int(created)

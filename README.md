@@ -30,14 +30,15 @@ Search (country / city / category / sources)
   → dedup / upsert (no duplicates across re-runs)
   → filter (drop inactive / low-followers / no-phone / no-website)
   → score (0–100 → Hot / Medium / Weak, with an explainable breakdown)
-  → store (SQLite) → display (grid) → export (Excel / Google Sheet)
+  → store (SQLite) → display (grid) → CRM (status · follow-ups · assigned-to) → export (Excel / Google Sheet)
+  → Dashboard (pipeline stages · conversion rate · follow-ups due)
 ```
 
 ## Data sources (tiered by feasibility)
 
 | Tier | Sources | Status |
 |---|---|---|
-| 🟢 **green** | EgyDir ✅ *(implemented)* · Kompass EG, Freight Club, WSD Connect, Forwarding Companies *(wired, stubbed)* | public business directories — easy & compliant |
+| 🟢 **green** | Freight Club ✅ *(real data)* · WSD Connect · Forwarding Companies *(wired)* · EgyDir *(selectors need live-verify — disabled)* · Kompass EG *(403 → needs Playwright)* | public business directories — easy & compliant |
 | 🟡 **yellow** | Google Maps, Yellow Pages EG | harder (Playwright + stealth), Phase 2, best-effort |
 | 🔴 **deferred** | Facebook, Instagram, LinkedIn, Truecaller | **OFF by default**, ToS/legal risk — see below |
 
@@ -58,9 +59,9 @@ All behaviour lives in `config/*.yaml`:
 
 ## Add a new directory source
 
-1. Copy `src/aol_leadfinder/scrapers/green/egydir.py` to a new module.
+1. Copy `src/aol_leadfinder/scrapers/green/freightclub.py` (the working reference) to a new module.
 2. Implement a pure `parse_listing(html)` classmethod with the site’s CSS selectors, and a thin `search()` that fetches.
-3. Record a fixture in `tests/fixtures/<source>_sample.html` and add a parse test (see `tests/test_scrape_egydir.py`).
+3. Record a fixture in `tests/fixtures/<source>_sample.html` and add a parse test (see `tests/test_scrape_freightclub.py`).
 4. Add an entry in `config/sources.yaml` pointing at the module, and set `enabled: true`.
 
 The scraper auto-registers (via `BaseScraper.__init_subclass__`) — no other wiring needed.
@@ -71,7 +72,7 @@ The scraper auto-registers (via `BaseScraper.__init_subclass__`) — no other wi
 
 ```
 src/aol_leadfinder/
-  ui/            Streamlit app (app.py + pages/)
+  ui/            Streamlit app (app.py + pages/: Search · Leads(CRM) · Export · Settings · Dashboard)
   scrapers/      base.py + registry.py + green/ yellow/ deferred/
   pipeline/      normalize.py, dedup.py, filters.py, score.py
   storage/       models.py (SQLModel), db.py (upsert), sheets_sync.py
@@ -80,6 +81,7 @@ src/aol_leadfinder/
 config/          categories / sources / scoring / filters  (YAML)
 tests/           unit tests + recorded HTML fixtures
 scripts/smoke.py CLI to test a source end-to-end
+docs/            WhatsApp manual (Arabic) + guides
 ```
 
 ## Testing
@@ -110,9 +112,11 @@ Enabling them is opt-in and **at your own legal/operational risk**. Compliant al
 - All data is stored **locally** (`data/leads.db`, git-ignored).
 - Before enabling any automated outreach later, add opt-in capture, opt-out handling, and register the promotional line with the operator/NTRA.
 
-## Roadmap
+## Roadmap (v2 — CRM-first)
 
-- **Phase 1 (now):** GREEN directories + filters + scoring + Excel/Sheets. *(EgyDir implemented; others stubbed.)*
-- **Phase 2:** Google Maps + Yellow Pages (Playwright + stealth, best-effort).
-- **Phase 3:** enrichment (website crawl for emails, e-commerce platform detection), better recency.
-- **Phase 4 (separate decision):** compliant WhatsApp outreach (Cloud API + opt-in templates), follow-ups.
+- **Sprint 1 (done):** CRM workflow (stages · follow-ups · assigned-to) + "Why this lead" + **Freight Club** real source + seed Dashboard + WhatsApp manual (`docs/WHATSAPP_MANUAL_AR.md`).
+- **Sprint 2:** more freight sources (WSD Connect, Forwarding Companies — phone on detail pages) + verify/fix EgyDir live selectors.
+- **Sprint 3:** Company Intelligence Engine — crawl site → classify (Importer/Exporter/Manufacturer/Distributor/Ecommerce/Forwarder) → Shipping Intent Score.
+- **Sprint 4:** Google Maps (Playwright + stealth) + Kompass via Playwright (403).
+- **Sprint 5:** full management Dashboard + Google Sheets improvements + advanced scoring.
+- **Deferred (OFF):** Facebook/Instagram/LinkedIn/Truecaller + WhatsApp automation.

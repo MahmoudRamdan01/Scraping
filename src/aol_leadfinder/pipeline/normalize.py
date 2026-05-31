@@ -82,6 +82,7 @@ class NormalizedLead:
     has_online_store: Optional[bool] = None
     score: int = 0
     tier: str = "Weak"
+    score_reasons: list = field(default_factory=list)
 
 
 def normalize_lead(raw: RawLead, *, default_country: str = "Egypt", region: str = "EG") -> NormalizedLead:

@@ -18,7 +18,7 @@ sources:
     label: "EgyDir (egydir.com)"
     module: aol_leadfinder.scrapers.green.egydir
     tier: green
-    enabled: true
+    enabled: false   # selectors are PROVISIONAL — verify vs live DOM before enabling (else returns 0)
     base_url: "https://www.egydir.com"
     rate_limit: {min: 2.0, max: 5.0}
 
@@ -34,8 +34,9 @@ sources:
     label: "Freight Club Directory (freightclub.net)"
     module: aol_leadfinder.scrapers.green.freightclub
     tier: green
-    enabled: false   # stub — implement parser then flip to true
-    base_url: "https://freightclub.net"
+    enabled: true   # REAL working source — confirmed selectors, phone in card
+    base_url: "https://www.freightclub.net"
+    page_param: page   # verify pagination param via scripts/smoke.py
     rate_limit: {min: 2.0, max: 5.0}
 
   wsdconnect:

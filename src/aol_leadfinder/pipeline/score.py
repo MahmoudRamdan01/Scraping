@@ -74,3 +74,24 @@ def score_lead(lead: Any, scfg: dict) -> tuple[int, str, list[dict]]:
     total = min(total, int(scfg.get("max_score", 100)))
     tier = _tier_for(total, scfg.get("tiers", {"Hot": 61, "Medium": 31, "Weak": 0}))
     return total, tier, breakdown
+
+
+# Human-readable labels for the "Why this lead?" explainability feature.
+REASON_LABELS = {
+    "has_website": "موقع ✓",
+    "has_phone": "رقم ✓",
+    "has_email": "إيميل ✓",
+    "has_linkedin": "LinkedIn ✓",
+    "multiple_branches": "فروع متعددة ✓",
+    "has_online_store": "متجر إلكتروني ✓",
+    "in_freight_directory": "شركة شحن ✓",
+    "recent_activity": "نشاط حديث ✓",
+    "followers": "متابعين كفاية ✓",
+}
+
+
+def format_reasons(reasons) -> str:
+    """Human-readable 'why this lead' string from a score breakdown list."""
+    if not reasons:
+        return ""
+    return "، ".join(REASON_LABELS.get(r.get("factor"), r.get("factor", "")) for r in reasons)

@@ -7,7 +7,30 @@ from typing import Optional
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
-LEAD_STATUSES = ["new", "contacted", "negotiating", "won", "rejected"]
+# CRM pipeline stages (machine values).
+LEAD_STATUSES = [
+    "new",
+    "contacted",
+    "interested",
+    "quotation_sent",
+    "negotiation",
+    "won",
+    "lost",
+]
+
+# Arabic labels for the UI (machine value -> label).
+STATUS_LABELS_AR = {
+    "new": "جديد",
+    "contacted": "تم التواصل",
+    "interested": "مهتم",
+    "quotation_sent": "اتبعت عرض سعر",
+    "negotiation": "تفاوض",
+    "won": "تعاقد ✅",
+    "lost": "خسارة",
+}
+
+# Statuses that count as "engaged" when computing conversion rate.
+ENGAGED_STATUSES = ["contacted", "interested", "quotation_sent", "negotiation", "won"]
 
 
 class Lead(SQLModel, table=True):
@@ -42,8 +65,14 @@ class Lead(SQLModel, table=True):
 
     score: int = 0
     tier: str = "Weak"
+    score_reasons: Optional[list] = Field(default=None, sa_column=Column(JSON))
+
+    # ---- CRM fields ----
     status: str = "new"
     notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    last_contact_date: Optional[date] = None
+    next_followup_date: Optional[date] = None
 
     run_id: Optional[int] = Field(default=None, foreign_key="run.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
