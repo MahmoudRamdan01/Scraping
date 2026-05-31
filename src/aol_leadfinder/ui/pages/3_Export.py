@@ -9,10 +9,9 @@ for _p in pathlib.Path(__file__).resolve().parents:
         sys.path.insert(0, str(_p))
         break
 
-import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from aol_leadfinder.export.excel import leads_to_dataframe  # noqa: E402
+from aol_leadfinder.export.excel import leads_to_dataframe, write_styled_workbook  # noqa: E402
 from aol_leadfinder.storage.db import read_all_leads  # noqa: E402
 from aol_leadfinder.storage.sheets_sync import (  # noqa: E402
     SheetsNotConfigured,
@@ -35,8 +34,7 @@ st.caption(f"{len(df)} عميل جاهز للتصدير")
 st.dataframe(df.head(20), use_container_width=True, hide_index=True)
 
 buffer = io.BytesIO()
-with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-    df.to_excel(writer, index=False, sheet_name="Leads")
+write_styled_workbook(df, buffer)
 st.download_button(
     "📥 تحميل Excel / Download Excel",
     data=buffer.getvalue(),

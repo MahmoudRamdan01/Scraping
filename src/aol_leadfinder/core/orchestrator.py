@@ -17,7 +17,7 @@ from ..enrichment.crawler import crawl_website
 from ..enrichment.intelligence import classify_company
 from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
-from ..pipeline.normalize import normalize_lead, normalize_phone
+from ..pipeline.normalize import normalize_lead
 from ..pipeline.score import score_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
@@ -45,8 +45,14 @@ class RunStats:
 
 
 def _enrich_website(norm, region: str = "EG") -> None:
-    """Crawl the lead's website (About/Services/Contact) and attach intelligence."""
-    intel = crawl_website(norm.website, category=norm.category)
+    """Crawl the lead's website (Contact/About/Services) and attach intelligence.
+
+    Phones from the website are trusted over a directory-supplied number, because
+    directories frequently carry stale/wrong numbers while the company's own site
+    is authoritative. All valid numbers are kept (primary + extra_phones), and
+    WhatsApp-reachable numbers are recorded in social_links.
+    """
+    intel = crawl_website(norm.website, category=norm.category, region=region)
     if intel.pages_crawled == 0:
         return
     norm.enriched = True
@@ -60,13 +66,29 @@ def _enrich_website(norm, region: str = "EG") -> None:
         norm.target_markets = intel.markets
     if not norm.email and intel.emails:
         norm.email = intel.emails[0]
-    if not norm.phone_e164 and intel.phones:
-        for phone in intel.phones:
-            e164 = normalize_phone(phone, region)
-            if e164:
-                norm.phone_raw = norm.phone_raw or phone
-                norm.phone_e164 = e164
-                break
+
+    # Phones: website is authoritative. Merge directory + website, keep all valid.
+    site_phones = intel.phones  # already validated E.164, contact-page first
+    if site_phones:
+        # Prefer a WhatsApp-reachable number as primary when available.
+        primary = next((p for p in site_phones if p in intel.whatsapp), site_phones[0])
+        all_phones = []
+        for p in [primary, norm.phone_e164, *site_phones]:
+            if p and p not in all_phones:
+                all_phones.append(p)
+        norm.phone_e164 = all_phones[0]
+        norm.phone_raw = norm.phone_raw or all_phones[0]
+        extras = [p for p in all_phones[1:] if p != norm.phone_e164]
+        merged_extras = list(norm.extra_phones or [])
+        for p in extras:
+            if p not in merged_extras:
+                merged_extras.append(p)
+        norm.extra_phones = merged_extras or None
+
+    if intel.whatsapp:
+        links = dict(norm.social_links or {})
+        links["whatsapp"] = "https://wa.me/" + intel.whatsapp[0].lstrip("+")
+        norm.social_links = links
 
 
 def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional[Settings] = None) -> RunStats:
