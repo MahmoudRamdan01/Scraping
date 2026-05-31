@@ -16,6 +16,7 @@ _COLUMNS = [
     ("category", "Category"),
     ("company_type", "Type"),
     ("shipping_intent", "Shipping Intent"),
+    ("target_markets", "Markets"),
     ("city", "City"),
     ("governorate", "Governorate"),
     ("country", "Country"),
@@ -39,7 +40,7 @@ def leads_to_dataframe(leads: Iterable) -> pd.DataFrame:
         row = {}
         for attr, header in _COLUMNS:
             val = getattr(lead, attr, None)
-            if attr == "extra_phones" and isinstance(val, list):
+            if attr in ("extra_phones", "target_markets") and isinstance(val, list):
                 val = ", ".join(val)
             row[header] = val
         rows.append(row)

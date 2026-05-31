@@ -66,6 +66,8 @@ class Lead(SQLModel, table=True):
 
     company_type: Optional[str] = None
     shipping_intent: Optional[int] = None
+    target_markets: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    enriched: bool = False
 
     score: int = 0
     tier: str = "Weak"

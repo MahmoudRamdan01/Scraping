@@ -29,6 +29,8 @@ _MIGRATION_COLUMNS = {
     "company_type": "TEXT",
     "shipping_intent": "INTEGER",
     "description": "TEXT",
+    "target_markets": "JSON",
+    "enriched": "INTEGER",
 }
 
 # CRM fields editable from the UI.
@@ -97,6 +99,10 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
             existing.company_type = n.company_type
         if n.shipping_intent is not None:
             existing.shipping_intent = n.shipping_intent
+        if n.target_markets:
+            existing.target_markets = n.target_markets
+        if n.enriched:
+            existing.enriched = True
         existing.updated_at = datetime.utcnow()
         session.add(existing)
         return existing, False
@@ -126,6 +132,8 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         has_online_store=n.has_online_store,
         company_type=n.company_type,
         shipping_intent=n.shipping_intent,
+        target_markets=(n.target_markets or None),
+        enriched=n.enriched,
         score=n.score,
         tier=n.tier,
         score_reasons=(n.score_reasons or None),

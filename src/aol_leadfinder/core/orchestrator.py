@@ -13,14 +13,14 @@ from typing import Optional
 from sqlmodel import Session
 
 from ..config import Settings, get_filters, get_scoring, get_settings
-from ..enrichment.intelligence import analyze_website_html, classify_company
+from ..enrichment.crawler import crawl_website
+from ..enrichment.intelligence import classify_company
 from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
 from ..pipeline.normalize import normalize_lead, normalize_phone
 from ..pipeline.score import score_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
-from ..scrapers.http import extract_emails_from_html, extract_phone_from_html, fetch_html
 from ..storage.db import get_engine, init_db, upsert_lead
 from ..storage.models import Run
 
@@ -45,27 +45,28 @@ class RunStats:
 
 
 def _enrich_website(norm, region: str = "EG") -> None:
-    """Best-effort: crawl the lead's website -> type/intent + fill phone/email."""
-    try:
-        html = fetch_html(norm.website)
-    except Exception as exc:  # noqa: BLE001 - enrichment never breaks a run
-        log.debug("enrichment failed for %s: %s", norm.website, exc)
+    """Crawl the lead's website (About/Services/Contact) and attach intelligence."""
+    intel = crawl_website(norm.website, category=norm.category)
+    if intel.pages_crawled == 0:
         return
-    intel = analyze_website_html(html, norm.category)
-    if not norm.company_type or norm.company_type == "Unknown":
+    norm.enriched = True
+    if (not norm.company_type or norm.company_type == "Unknown") and intel.company_type != "Unknown":
         norm.company_type = intel.company_type
-        norm.shipping_intent = intel.shipping_intent
+    if intel.shipping_intent:
+        norm.shipping_intent = max(norm.shipping_intent or 0, intel.shipping_intent)
     if intel.has_online_store:
         norm.has_online_store = True
-    if not norm.email:
-        emails = extract_emails_from_html(html)
-        if emails:
-            norm.email = emails[0]
-    if not norm.phone_e164:
-        phone = extract_phone_from_html(html)
-        if phone:
-            norm.phone_raw = norm.phone_raw or phone
-            norm.phone_e164 = normalize_phone(phone, region)
+    if intel.markets:
+        norm.target_markets = intel.markets
+    if not norm.email and intel.emails:
+        norm.email = intel.emails[0]
+    if not norm.phone_e164 and intel.phones:
+        for phone in intel.phones:
+            e164 = normalize_phone(phone, region)
+            if e164:
+                norm.phone_raw = norm.phone_raw or phone
+                norm.phone_e164 = e164
+                break
 
 
 def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional[Settings] = None) -> RunStats:

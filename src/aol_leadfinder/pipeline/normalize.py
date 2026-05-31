@@ -83,6 +83,8 @@ class NormalizedLead:
     has_online_store: Optional[bool] = None
     company_type: Optional[str] = None
     shipping_intent: Optional[int] = None
+    target_markets: list = field(default_factory=list)
+    enriched: bool = False
     score: int = 0
     tier: str = "Weak"
     score_reasons: list = field(default_factory=list)
