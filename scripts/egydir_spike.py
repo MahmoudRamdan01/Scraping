@@ -11,6 +11,7 @@ Run:
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -30,10 +31,15 @@ def main() -> None:
         print("Playwright not installed. Run: pip install playwright && playwright install chromium")
         return
 
+    insecure = str(os.environ.get("AOL_INSECURE_SSL", "false")).lower() in {"1", "true", "yes", "on"}
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0")
+            context = browser.new_context(
+                ignore_https_errors=insecure,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0",
+            )
+            page = context.new_page()
             for url in CANDIDATE_URLS:
                 try:
                     page.goto(url, wait_until="networkidle", timeout=30000)
