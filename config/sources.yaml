@@ -52,7 +52,7 @@ sources:
     label: "Forwarding Companies (forwardingcompanies.com)"
     module: aol_leadfinder.scrapers.green.forwarding_companies
     tier: green
-    enabled: false   # implemented in a later step; placeholder
+    enabled: true   # REAL source — 343 Egypt companies, name+location+description
     base_url: "https://forwardingcompanies.com"
     rate_limit: {min: 2.0, max: 5.0}
 

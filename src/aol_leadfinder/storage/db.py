@@ -15,8 +15,8 @@ from .models import Lead, Run
 # Fields merged from a new sighting into an existing lead (fill blanks only).
 _MERGE_FIELDS = (
     "phone_e164", "phone_raw", "email", "website", "domain", "address", "city",
-    "governorate", "country", "category", "source", "source_url", "followers",
-    "last_activity_date", "rating", "branches", "has_online_store",
+    "governorate", "country", "category", "description", "source", "source_url",
+    "followers", "last_activity_date", "rating", "branches", "has_online_store",
 )
 _EMPTY = (None, "", [])
 
@@ -28,6 +28,7 @@ _MIGRATION_COLUMNS = {
     "next_followup_date": "DATE",
     "company_type": "TEXT",
     "shipping_intent": "INTEGER",
+    "description": "TEXT",
 }
 
 # CRM fields editable from the UI.
@@ -114,6 +115,7 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         governorate=n.governorate,
         country=n.country,
         category=n.category,
+        description=n.description,
         source=n.source,
         source_url=n.source_url,
         social_links=(n.social_links or None),

@@ -39,7 +39,7 @@ Search (country / city / category / sources)
 
 | Tier | Sources | Status |
 |---|---|---|
-| 🟢 **green** | Freight Club ✅ · WSD Connect ✅ *(+website/email, phone via detail)* · Forwarding Companies *(wired)* · EgyDir *(needs live-verify — disabled)* · Kompass EG *(403 → Playwright)* | public business directories — easy & compliant |
+| 🟢 **green** | Forwarding Companies ✅ *(343 EG + descriptions)* · Freight Club ✅ *(phones)* · WSD Connect ✅ *(+website/email)* · EgyDir *(JS/AJAX SPA → deferred)* · Kompass EG *(403 → Playwright)* | **rebuilt against verified live DOM** |
 | 🟡 **yellow** | Google Maps, Yellow Pages EG | harder (Playwright + stealth), Phase 2, best-effort |
 | 🔴 **deferred** | Facebook, Instagram, LinkedIn, Truecaller | **OFF by default**, ToS/legal risk — see below |
 
@@ -54,7 +54,7 @@ All behaviour lives in `config/*.yaml`:
 - **`categories.yaml`** — target industries + Arabic/English search keywords. Add one here or via the **Settings** page (➕).
 - **`sources.yaml`** — which sources exist, their tier, whether they’re `enabled`, rate limits, and (for deferred) the required feature flag.
 - **`scoring.yaml`** — lead-scoring weights and tier thresholds. Edit to retune; the score is transparent and shows *why* on screen.
-- **`filters.yaml`** — the sales team’s quality rules: drop inactive pages (e.g. last active ≤ 2023), minimum followers, require phone, require website.
+- **`filters.yaml`** — the sales team’s quality rules: drop inactive pages (e.g. last active ≤ 2023), minimum followers, and at least one contact method (`require_contact`; strict `require_phone`/`require_website` are opt-in).
 
 ---
 
@@ -90,7 +90,9 @@ docs/            WhatsApp manual (Arabic) + guides
 ```bash
 . .venv/bin/activate
 pytest                                   # unit + fixture-based parse tests
-python scripts/smoke.py --source dummy   # end-to-end smoke (offline)
+python scripts/smoke.py --source dummy                       # offline smoke
+python scripts/smoke.py --source forwarding_companies --category "Freight Forwarder" --country Egypt   # live
+# If your network/clock breaks TLS (cert "not yet valid"), prefix with  AOL_INSECURE_SSL=true
 ```
 
 Scraper tests run against **recorded HTML fixtures** (no live network) so they stay stable even when sites change. Use `scripts/smoke.py` against a live source to detect DOM drift.
@@ -116,7 +118,7 @@ Enabling them is opt-in and **at your own legal/operational risk**. Compliant al
 ## Roadmap (v2 — CRM-first)
 
 - **Sprint 1 (done):** CRM workflow (stages · follow-ups · assigned-to) + "Why this lead" + **Freight Club** real source + seed Dashboard + WhatsApp manual (`docs/WHATSAPP_MANUAL_AR.md`).
-- **Sprint 2 (done):** WSD Connect source (website + email + detail-page phone) + shared crawl primitives (`scrapers/http.py`). *(Forwarding Companies + EgyDir live-verify still pending.)*
+- **Sprint 2 (done):** 3 real sources **rebuilt against verified live DOM** — Forwarding Companies (343 EG rows + descriptions), Freight Club (name↔tel phones), WSD Connect (website/email). Shared crawl primitives (`scrapers/http.py`). EgyDir turned out to be a JS/AJAX SPA with no public endpoint → deferred to Playwright.
 - **Sprint 3 (done):** Company Intelligence Engine (`enrichment/intelligence.py`) — crawl site → classify (Importer/Exporter/Manufacturer/Distributor/Ecommerce/Forwarder) → **Shipping Intent Score** (opt-in toggle on Search; shown in Leads + Dashboard).
 - **Sprint 4:** Google Maps (Playwright + stealth) + Kompass via Playwright (403).
 - **Sprint 5:** full management Dashboard + Google Sheets improvements + advanced scoring.

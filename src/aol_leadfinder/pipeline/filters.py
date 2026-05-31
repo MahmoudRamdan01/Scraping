@@ -15,6 +15,16 @@ def passes_filters(lead: Any, fcfg: dict) -> tuple[bool, Optional[str]]:
     if fcfg.get("require_website") and not (getattr(lead, "website", None) or getattr(lead, "domain", None)):
         return False, "no_website"
 
+    if fcfg.get("require_contact"):
+        has_contact = (
+            getattr(lead, "phone_e164", None)
+            or getattr(lead, "email", None)
+            or getattr(lead, "website", None)
+            or getattr(lead, "domain", None)
+        )
+        if not has_contact:
+            return False, "no_contact"
+
     activity = fcfg.get("activity", {})
     if activity.get("enabled"):
         last = getattr(lead, "last_activity_date", None)

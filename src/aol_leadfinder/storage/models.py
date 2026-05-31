@@ -52,6 +52,7 @@ class Lead(SQLModel, table=True):
     governorate: Optional[str] = None
     country: Optional[str] = None
     category: Optional[str] = None
+    description: Optional[str] = None
 
     source: Optional[str] = None
     source_url: Optional[str] = None

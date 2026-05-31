@@ -74,6 +74,7 @@ class NormalizedLead:
     governorate: Optional[str] = None
     country: Optional[str] = None
     category: Optional[str] = None
+    description: Optional[str] = None
     social_links: dict = field(default_factory=dict)
     followers: Optional[int] = None
     last_activity_date: Optional[date] = None
@@ -123,6 +124,7 @@ def normalize_lead(raw: RawLead, *, default_country: str = "Egypt", region: str 
         governorate=raw.governorate,
         country=raw.country or default_country,
         category=raw.category,
+        description=raw.description,
         social_links=raw.social_links or {},
         followers=raw.followers,
         last_activity_date=raw.last_activity_date,

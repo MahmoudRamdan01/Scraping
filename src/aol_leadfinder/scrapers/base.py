@@ -43,6 +43,7 @@ class RawLead:
     governorate: Optional[str] = None
     country: Optional[str] = None
     category: Optional[str] = None
+    description: Optional[str] = None
     social_links: dict = field(default_factory=dict)
     followers: Optional[int] = None
     last_activity_date: Optional[date] = None

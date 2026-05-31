@@ -71,6 +71,10 @@ def score_lead(lead: Any, scfg: dict) -> tuple[int, str, list[dict]]:
                 add("followers", bucket["points"])
                 break
 
+    intent = getattr(lead, "shipping_intent", None)
+    if intent:
+        add("shipping_intent", min(int(intent) // 5, int(scfg.get("max_intent_points", 20))))
+
     total = min(total, int(scfg.get("max_score", 100)))
     tier = _tier_for(total, scfg.get("tiers", {"Hot": 61, "Medium": 31, "Weak": 0}))
     return total, tier, breakdown
@@ -87,6 +91,7 @@ REASON_LABELS = {
     "in_freight_directory": "شركة شحن ✓",
     "recent_activity": "نشاط حديث ✓",
     "followers": "متابعين كفاية ✓",
+    "shipping_intent": "نية شحن ✓",
 }
 
 

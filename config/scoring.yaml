@@ -2,6 +2,7 @@
 # without touching code. Score is clamped to max_score, then mapped to a tier.
 
 max_score: 100
+max_intent_points: 20   # how many points a high Shipping-Intent (0-100) can add
 
 tiers:        # minimum score for each tier
   Hot: 61

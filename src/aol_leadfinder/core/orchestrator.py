@@ -13,14 +13,14 @@ from typing import Optional
 from sqlmodel import Session
 
 from ..config import Settings, get_filters, get_scoring, get_settings
-from ..enrichment.intelligence import analyze_website_html
+from ..enrichment.intelligence import analyze_website_html, classify_company
 from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
-from ..pipeline.normalize import normalize_lead
+from ..pipeline.normalize import normalize_lead, normalize_phone
 from ..pipeline.score import score_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
-from ..scrapers.http import extract_emails_from_html, fetch_html
+from ..scrapers.http import extract_emails_from_html, extract_phone_from_html, fetch_html
 from ..storage.db import get_engine, init_db, upsert_lead
 from ..storage.models import Run
 
@@ -44,22 +44,28 @@ class RunStats:
         self.drop_reasons[key] = self.drop_reasons.get(key, 0) + 1
 
 
-def _enrich_website(norm) -> None:
-    """Best-effort: crawl the lead's website -> company type + shipping intent."""
+def _enrich_website(norm, region: str = "EG") -> None:
+    """Best-effort: crawl the lead's website -> type/intent + fill phone/email."""
     try:
         html = fetch_html(norm.website)
     except Exception as exc:  # noqa: BLE001 - enrichment never breaks a run
         log.debug("enrichment failed for %s: %s", norm.website, exc)
         return
     intel = analyze_website_html(html, norm.category)
-    norm.company_type = intel.company_type
-    norm.shipping_intent = intel.shipping_intent
+    if not norm.company_type or norm.company_type == "Unknown":
+        norm.company_type = intel.company_type
+        norm.shipping_intent = intel.shipping_intent
     if intel.has_online_store:
         norm.has_online_store = True
     if not norm.email:
         emails = extract_emails_from_html(html)
         if emails:
             norm.email = emails[0]
+    if not norm.phone_e164:
+        phone = extract_phone_from_html(html)
+        if phone:
+            norm.phone_raw = norm.phone_raw or phone
+            norm.phone_e164 = normalize_phone(phone, region)
 
 
 def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional[Settings] = None) -> RunStats:
@@ -96,12 +102,21 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
                     norm = normalize_lead(
                         raw, default_country=settings.default_country, region=settings.default_region
                     )
+                    # Company Intelligence from the listing description (offline, free).
+                    # Falls back to the category when there's no description text.
+                    if norm.description or norm.category:
+                        intel = classify_company(norm.description or "", norm.category)
+                        norm.company_type = intel.company_type
+                        norm.shipping_intent = intel.shipping_intent
+                        if intel.has_online_store:
+                            norm.has_online_store = True
+                    # Optional deep website crawl (fills phone/email/type/intent)
+                    if req.enrich_websites and norm.website:
+                        _enrich_website(norm, settings.default_region)
                     ok, reason = passes_filters(norm, filters)
                     if not ok:
                         stats.drop(reason)
                         continue
-                    if req.enrich_websites and norm.website:
-                        _enrich_website(norm)
                     score, tier, reasons = score_lead(norm, scoring)
                     norm.score, norm.tier, norm.score_reasons = score, tier, reasons
                     _, created = upsert_lead(session, norm, run.id)

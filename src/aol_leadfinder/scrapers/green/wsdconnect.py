@@ -1,25 +1,30 @@
 """World Shipping Directory (wsdconnect.com) — real GREEN source.
 
-Listing cards (server-rendered, confirmed) give company name, location, email and
-**website**. Phone lives on the company detail page, so this scraper does a
-two-stage fetch: listing -> per-company detail (generic phone extraction).
-
-It's a global directory, so results are filtered to the requested country.
-The website it captures is exactly what the Company Intelligence engine needs.
+Verified against the live site: listing cards are ``<div class="listing-card">``
+with the detail URL in an ``onclick`` attribute, a ``.listing-company-name``,
+a ``.listing-category-tag``, and a contact block with a ``mailto:`` email and
+the company's website link. There's no phone in the listing — it can be filled
+later from the website via the optional Company Intelligence crawl. Global
+directory, so results are filtered to the requested country.
 """
 from __future__ import annotations
 
+import re
 from typing import Iterator, Optional
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
+
+from bs4 import BeautifulSoup
 
 from ..base import BaseScraper, RawLead, SearchRequest
-from ..http import extract_emails_from_html, extract_phone_from_html, fetch_html
+from ..http import fetch_html
 
 _FREIGHT_HINTS = ("freight", "forward", "logistic", "customs", "truck", "shipping", "cargo", "clearance")
+_ONCLICK_RE = re.compile(r"window\.location\s*=\s*'([^']+)'")
+_SOCIAL = ("facebook", "twitter", "linkedin", "youtube", "instagram", "google", "whatsapp", "pinterest", "t.me")
 
 
 def _text(el) -> Optional[str]:
-    return el.get_text(strip=True) if el else None
+    return el.get_text(" ", strip=True) if el else None
 
 
 def _is_freight(category: Optional[str]) -> bool:
@@ -31,15 +36,13 @@ class WsdConnectScraper(BaseScraper):
     label = "World Shipping Directory (wsdconnect.com)"
     tier = "green"
 
-    LISTING_SELECTOR = "div.company-card"
-    NAME_SELECTOR = ".company-name a"
-    LOCATION_SELECTOR = ".company-location"
-    EMAIL_SELECTOR = ".company-email"
-    WEBSITE_SELECTOR = ".company-website"
-    DETAIL_SELECTOR = ".view-details-link"
+    LISTING_SELECTOR = "div.listing-card"
+    NAME_SELECTOR = ".listing-company-name"
+    CATEGORY_SELECTOR = ".listing-category-tag"
+    LOCATION_SELECTOR = ".listing-meta"
 
     MAX_PAGES = 20
-    fetch_details = True
+    GIVE_UP_AFTER_EMPTY = 6
 
     def _base_url(self) -> str:
         return self.meta.get("base_url", "https://wsdconnect.com")
@@ -53,64 +56,64 @@ class WsdConnectScraper(BaseScraper):
 
     def search(self, req: SearchRequest) -> Iterator[RawLead]:
         if not _is_freight(req.category):
-            return  # WSD only lists shipping/logistics companies
-        service = req.category or "Freight Forwarding"
+            return
+        # It's a global directory — search by country to surface country-specific
+        # companies, falling back to the category term.
+        service = req.country or req.category or "Freight Forwarding"
         country = (req.country or "").strip().lower()
+        seen: set[str] = set()
         emitted = 0
+        empty_streak = 0
         for page in range(1, self.MAX_PAGES + 1):
             html = fetch_html(self._search_url(service, page))
-            leads = self.parse_listing(html, base_url=self._base_url(), category=req.category)
+            leads = self.parse_listing(html, category=req.category)
+            if not leads:
+                return
             new_on_page = 0
             for lead in leads:
-                location = " ".join(filter(None, [lead.country, lead.address])).lower()
-                if country and country not in location:
+                blob = f"{lead.address or ''} {lead.country or ''} {lead.company_name or ''}".lower()
+                if country and country not in blob:
                     continue
+                key = lead.source_url or lead.company_name
+                if key in seen:
+                    continue
+                seen.add(key)
                 new_on_page += 1
-                if self.fetch_details and lead.source_url and not lead.phone_raw:
-                    self._enrich_from_detail(lead)
-                    self.polite_sleep()
                 emitted += 1
                 yield lead
                 if emitted >= req.max_results:
                     return
-            if new_on_page == 0:
+            empty_streak = empty_streak + 1 if new_on_page == 0 else 0
+            if empty_streak >= self.GIVE_UP_AFTER_EMPTY:
                 return
             self.polite_sleep()
 
-    def _enrich_from_detail(self, lead: RawLead) -> None:
-        try:
-            html = fetch_html(lead.source_url)
-        except Exception:  # noqa: BLE001 - detail enrichment is best-effort
-            return
-        lead.phone_raw = extract_phone_from_html(html)
-        if not lead.email:
-            emails = extract_emails_from_html(html)
-            if emails:
-                lead.email = emails[0]
-
     @classmethod
-    def parse_listing(
-        cls,
-        html: str,
-        *,
-        base_url: str = "https://wsdconnect.com",
-        category: Optional[str] = None,
-    ) -> list[RawLead]:
-        from bs4 import BeautifulSoup
-
+    def parse_listing(cls, html: str, *, category: Optional[str] = None) -> list[RawLead]:
         soup = BeautifulSoup(html, "lxml")
         leads: list[RawLead] = []
         for card in soup.select(cls.LISTING_SELECTOR):
-            name_el = card.select_one(cls.NAME_SELECTOR) or card.select_one(".company-name")
-            name = _text(name_el)
+            name = _text(card.select_one(cls.NAME_SELECTOR))
             if not name:
                 continue
 
-            href = name_el.get("href") if (name_el and name_el.has_attr("href")) else None
-            if not href:
-                detail = card.select_one(cls.DETAIL_SELECTOR)
-                href = detail["href"] if (detail and detail.get("href")) else None
-            source_url = urljoin(base_url, href) if href else None
+            source_url = None
+            match = _ONCLICK_RE.search(card.get("onclick", ""))
+            if match:
+                source_url = match.group(1)
+
+            email = None
+            mail = card.select_one("a[href^='mailto:']")
+            if mail is not None:
+                email = mail["href"][7:].split("?")[0].strip()
+
+            website = None
+            for a in card.select("a[href^='http']"):
+                low = a["href"].lower()
+                if "wsdconnect.com" in low or any(s in low for s in _SOCIAL):
+                    continue
+                website = a["href"]
+                break
 
             location = _text(card.select_one(cls.LOCATION_SELECTOR))
             city = country = None
@@ -119,17 +122,6 @@ class WsdConnectScraper(BaseScraper):
                 city, country = parts[0], parts[-1]
             elif location:
                 country = location
-
-            email = None
-            email_el = card.select_one(cls.EMAIL_SELECTOR)
-            if email_el is not None:
-                href2 = email_el.get("href", "")
-                email = href2[7:].strip() if href2.startswith("mailto:") else _text(email_el)
-
-            web_el = card.select_one(cls.WEBSITE_SELECTOR)
-            website = None
-            if web_el is not None:
-                website = web_el.get("href") or _text(web_el)
 
             leads.append(
                 RawLead(
@@ -141,7 +133,7 @@ class WsdConnectScraper(BaseScraper):
                     city=city,
                     country=country,
                     address=location,
-                    category=category,
+                    category=_text(card.select_one(cls.CATEGORY_SELECTOR)) or category,
                 )
             )
         return leads

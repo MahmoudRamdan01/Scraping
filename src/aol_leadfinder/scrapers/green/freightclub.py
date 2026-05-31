@@ -1,31 +1,20 @@
-"""Freight Club Directory (freightclub.net) — first REAL working GREEN source.
+"""Freight Club Directory (freightclub.net) — real GREEN source.
 
-Selectors confirmed against the live site (2026): listing cards are server-rendered
-(`requests` + BeautifulSoup is enough, no Cloudflare/JS), phone numbers are visible
-in each card as a `tel:` link. This is a freight-forwarder directory, so it yields
-shipping/logistics companies (ideal Air Ocean Line partners). For non-freight
-categories it yields nothing (those live on Google Maps / EgyDir).
-
-Pagination param is set via sources.yaml `page_param` (default "page") and verified
-with scripts/smoke.py; the loop stops as soon as a page returns no new companies.
+Verified against the live site: it's an Elementor page where each company is a
+name link to ``/companies/<slug>/`` followed by a ``tel:`` phone link. We pair
+each phone with the nearest preceding company link (document order), which is
+robust to the generated Elementor wrapper markup.
 """
 from __future__ import annotations
 
+import re
 from typing import Iterator, Optional
 from urllib.parse import quote, urljoin
 
-import requests
 from bs4 import BeautifulSoup
 
 from ..base import BaseScraper, RawLead, SearchRequest
-
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    ),
-    "Accept-Language": "en,ar;q=0.8",
-}
+from ..http import fetch_html
 
 # Map our category names to FreightClub's directory categories.
 _FREIGHT_CATEGORY_MAP = {
@@ -38,9 +27,8 @@ _FREIGHT_CATEGORY_MAP = {
     "transport": "Trucking Companies",
 }
 
-
-def _text(el) -> Optional[str]:
-    return el.get_text(strip=True) if el else None
+_SLUG_RE = re.compile(r"/companies/([^/?#]+)/?$")
+_SKIP_SLUGS = {"feed"}
 
 
 def _map_category(category: Optional[str]) -> Optional[str]:
@@ -59,11 +47,6 @@ class FreightClubScraper(BaseScraper):
     label = "Freight Club Directory (freightclub.net)"
     tier = "green"
 
-    LISTING_SELECTOR = "div.company-card"
-    NAME_SELECTOR = "h3 a"
-    PHONE_SELECTOR = ".phone"
-    COUNTRY_SELECTOR = ".country"
-
     MAX_PAGES = 20
 
     def _base_url(self) -> str:
@@ -76,27 +59,21 @@ class FreightClubScraper(BaseScraper):
         base = f"{self._base_url()}/companies?category={quote(fc_category)}&country={quote(country)}"
         return f"{base}&{self._page_param()}={page}" if page > 1 else base
 
-    def _fetch(self, url: str) -> str:
-        resp = requests.get(url, headers=_HEADERS, timeout=20)
-        resp.raise_for_status()
-        return resp.text
-
     def search(self, req: SearchRequest) -> Iterator[RawLead]:
         fc_category = _map_category(req.category)
         if fc_category is None:
-            # FreightClub only lists freight/logistics companies.
             return
         country = req.country or "Egypt"
         seen: set[str] = set()
         emitted = 0
         for page in range(1, self.MAX_PAGES + 1):
-            html = self._fetch(self._search_url(fc_category, country, page))
+            html = fetch_html(self._search_url(fc_category, country, page))
             leads = self.parse_listing(
                 html, base_url=self._base_url(), country=country, category=req.category or fc_category
             )
             new_on_page = 0
             for lead in leads:
-                key = lead.source_url or f"{lead.company_name}|{lead.phone_raw}"
+                key = lead.source_url or lead.company_name
                 if key in seen:
                     continue
                 seen.add(key)
@@ -105,7 +82,7 @@ class FreightClubScraper(BaseScraper):
                 yield lead
                 if emitted >= req.max_results:
                     return
-            if new_on_page == 0:  # no more pages (or pagination param ignored)
+            if new_on_page == 0:
                 return
             self.polite_sleep()
 
@@ -120,29 +97,24 @@ class FreightClubScraper(BaseScraper):
     ) -> list[RawLead]:
         soup = BeautifulSoup(html, "lxml")
         leads: list[RawLead] = []
-        for card in soup.select(cls.LISTING_SELECTOR):
-            name_el = card.select_one(cls.NAME_SELECTOR)
-            name = _text(name_el)
-            if not name:
-                continue
-            source_url = (
-                urljoin(base_url, name_el["href"]) if (name_el and name_el.get("href")) else None
-            )
-
-            phone = None
-            phone_el = card.select_one(cls.PHONE_SELECTOR)
-            if phone_el is not None:
-                href = phone_el.get("href", "")
-                phone = href[4:].strip() if href.startswith("tel:") else _text(phone_el)
-
-            leads.append(
-                RawLead(
-                    company_name=name,
-                    source=cls.key,
-                    source_url=source_url,
-                    phone_raw=phone,
-                    country=_text(card.select_one(cls.COUNTRY_SELECTOR)) or country,
-                    category=category,
+        current: Optional[dict] = None
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            match = _SLUG_RE.search(href)
+            if match and match.group(1) not in _SKIP_SLUGS:
+                name = a.get_text(" ", strip=True)
+                if name and len(name) > 1:
+                    current = {"name": name, "url": urljoin(base_url, href)}
+            elif href.startswith("tel:") and current is not None:
+                leads.append(
+                    RawLead(
+                        company_name=current["name"],
+                        source=cls.key,
+                        source_url=current["url"],
+                        phone_raw=href[4:].strip(),
+                        country=country,
+                        category=category,
+                    )
                 )
-            )
+                current = None
         return leads

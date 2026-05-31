@@ -7,6 +7,7 @@ fine — invalid ones get dropped downstream.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Optional
 
@@ -25,8 +26,19 @@ _PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,}\d)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
-def fetch_html(url: str, timeout: int = 20) -> str:
-    resp = requests.get(url, headers=HEADERS, timeout=timeout)
+def _insecure_default() -> bool:
+    # Opt-in for environments with broken clocks / TLS-intercepting proxies.
+    return str(os.environ.get("AOL_INSECURE_SSL", "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def fetch_html(url: str, timeout: int = 20, verify: Optional[bool] = None) -> str:
+    if verify is None:
+        verify = not _insecure_default()
+    if not verify:
+        import urllib3
+
+        urllib3.disable_warnings()
+    resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=verify)
     resp.raise_for_status()
     return resp.text
 

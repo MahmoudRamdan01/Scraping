@@ -13,8 +13,9 @@ followers:
   enabled: true
   min: 1000
 
-# A usable lead must have a phone number.
-require_phone: true
+# A usable lead must have at least one contact method (phone OR email OR website).
+require_contact: true
 
-# Focus on organized companies: require a website/page. Set false to relax.
-require_website: true
+# Stricter options (off by default): require a phone, or a website specifically.
+require_phone: false
+require_website: false
