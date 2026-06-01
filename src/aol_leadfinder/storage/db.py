@@ -31,7 +31,16 @@ _MIGRATION_COLUMNS = {
     "description": "TEXT",
     "target_markets": "JSON",
     "enriched": "INTEGER",
+    "sources_seen": "TEXT",
 }
+
+
+def _merge_sources_seen(existing_seen: Optional[str], new_source: Optional[str]) -> Optional[str]:
+    """Append-only union of source keys, comma-joined and sorted (stable, dedup'd)."""
+    seen = {s for s in (existing_seen or "").split(",") if s}
+    if new_source:
+        seen.add(new_source)
+    return ",".join(sorted(seen)) or None
 
 # CRM fields editable from the UI.
 _CRM_FIELDS = {"status", "notes", "assigned_to", "last_contact_date", "next_followup_date"}
@@ -85,6 +94,8 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
             new_val = getattr(n, fld, None)
             if getattr(existing, fld, None) in _EMPTY and new_val not in _EMPTY:
                 setattr(existing, fld, new_val)
+        # `source` (above) stays the first-seen primary; `sources_seen` accumulates all.
+        existing.sources_seen = _merge_sources_seen(existing.sources_seen, n.source)
         extras = set(existing.extra_phones or []) | set(n.extra_phones or [])
         extras.discard(existing.phone_e164)
         existing.extra_phones = sorted(extras) or None
@@ -124,6 +135,7 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         description=n.description,
         source=n.source,
         source_url=n.source_url,
+        sources_seen=_merge_sources_seen(None, n.source),
         social_links=(n.social_links or None),
         followers=n.followers,
         last_activity_date=n.last_activity_date,

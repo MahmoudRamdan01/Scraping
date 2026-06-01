@@ -54,8 +54,9 @@ class Lead(SQLModel, table=True):
     category: Optional[str] = None
     description: Optional[str] = None
 
-    source: Optional[str] = None
+    source: Optional[str] = None  # primary (first-seen) source
     source_url: Optional[str] = None
+    sources_seen: Optional[str] = None  # comma-joined union of every source that contributed
     social_links: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
     followers: Optional[int] = None

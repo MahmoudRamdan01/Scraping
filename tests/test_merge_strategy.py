@@ -55,3 +55,17 @@ def test_same_name_different_city_stays_separate():
         session.commit()
         assert created is True  # different city -> distinct company, no false merge
     assert len(read_all_leads(engine)) == 2
+
+
+def test_sources_seen_accumulates_while_primary_source_is_stable():
+    engine = _engine()
+    with Session(engine) as session:
+        # Same phone seen by three sources -> one lead, provenance preserved.
+        for src in ("google_maps", "egydir", "yellowpages_eg"):
+            upsert_lead(session, normalize_lead(RawLead(company_name="Cairo Textiles", source=src, phone_raw="01012345678")))
+        session.commit()
+    leads = read_all_leads(engine)
+    assert len(leads) == 1
+    assert leads[0].source == "google_maps"  # primary = first seen, never overwritten
+    assert leads[0].sources_seen == "egydir,google_maps,yellowpages_eg"  # sorted union of all
+
