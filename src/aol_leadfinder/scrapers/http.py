@@ -8,7 +8,9 @@ returns only valid E.164 numbers (WhatsApp/tel first). This avoids the classic
 from __future__ import annotations
 
 import os
+import random
 import re
+import time
 from typing import Optional
 
 import phonenumbers
@@ -43,16 +45,57 @@ def _insecure_default() -> bool:
     return str(os.environ.get("AOL_INSECURE_SSL", "false")).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def fetch_html(url: str, timeout: int = 20, verify: Optional[bool] = None) -> str:
+# HTTP statuses worth a retry: rate-limit + transient server errors. A 4xx like
+# 404/403 is terminal (the page won't appear by asking again), so it fails fast.
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def fetch_html(
+    url: str,
+    timeout: int = 20,
+    verify: Optional[bool] = None,
+    *,
+    retries: int = 3,
+    backoff_base: float = 1.5,
+) -> str:
+    """GET ``url`` and return its HTML, retrying only *transient* failures.
+
+    Network errors, timeouts, and retryable HTTP statuses (429/5xx) are retried up
+    to ``retries`` times with exponential backoff + jitter; non-retryable client
+    errors (404/403/…) fail fast. Every scraper goes through this single function,
+    so the resilience is inherited centrally instead of reimplemented per source.
+    The success (200) path is a single request with zero added overhead.
+    """
     if verify is None:
         verify = not _insecure_default()
     if not verify:
         import urllib3
 
         urllib3.disable_warnings()
-    resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=verify)
-    resp.raise_for_status()
-    return resp.text
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=verify)
+        except requests.RequestException as exc:
+            # Connection reset, DNS failure, timeout, etc.
+            last_exc = exc
+            if attempt >= retries:
+                raise
+            time.sleep(backoff_base ** attempt + random.uniform(0, 0.5))
+            continue
+
+        if resp.status_code in _RETRY_STATUS and attempt < retries:
+            last_exc = requests.HTTPError(f"{resp.status_code} Server Error for url: {url}", response=resp)
+            time.sleep(backoff_base ** attempt + random.uniform(0, 0.5))
+            continue
+
+        # 200 -> return; non-retryable 4xx or a final-attempt 5xx -> raise here
+        # (outside the network except, so HTTPError is never re-caught as transient).
+        resp.raise_for_status()
+        return resp.text
+
+    raise last_exc if last_exc is not None else RuntimeError(f"fetch_html failed for {url}")
 
 
 def best_e164(raw: str, region: str = "EG") -> Optional[str]:
