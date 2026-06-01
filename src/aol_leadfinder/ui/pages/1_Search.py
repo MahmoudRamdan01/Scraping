@@ -26,11 +26,20 @@ st.warning(
 categories = get_categories()
 category_names = [c["name"] for c in categories]
 
-col1, col2, col3 = st.columns(3)
+# Business role — turns a category into an End-Customer query
+# (e.g. Cosmetics + Manufacturer -> "Cosmetics manufacturers in Cairo").
+ROLES = ["Manufacturer", "Factory", "Importer", "Exporter", "Distributor", "Wholesaler", "Supplier", "(أي)"]
+
+col1, col2, col3, col4 = st.columns(4)
 country = col1.text_input("Country / الدولة", "Egypt")
-city = col2.text_input("City / المدينة / المحافظة", "Alexandria")
+city = col2.text_input("City / المدينة / المحافظة", "Cairo")
 category = col3.selectbox("Category / المجال", category_names)
+role = col4.selectbox("Business Role / نوع النشاط", ROLES, index=0)
 max_results = st.slider("أقصى عدد نتائج لكل مصدر / Max results per source", 10, 500, 100, 10)
+st.caption(
+    "💡 لاستهداف **العملاء النهائيين**: استخدم Google Maps مع Category + Role "
+    "(مثال: Cosmetics + Manufacturer في Cairo). أدلة الشحن للشراكات (Forwarders)."
+)
 enrich = st.checkbox(
     "🔎 حلّل مواقع الشركات (Company Intelligence) — أبطأ، بيقيّم نوع الشركة ونية الشحن",
     value=False,
@@ -56,8 +65,9 @@ if st.button("🚀 ابدأ البحث / Run", type="primary"):
         st.stop()
     keywords = next((c.get("keywords", []) for c in categories if c["name"] == category), [])
     req = SearchRequest(
-        country=country, city=city, category=category, keywords=keywords,
-        max_results=max_results, enrich_websites=enrich,
+        country=country, city=city, category=category,
+        role=(None if role == "(أي)" else role),
+        keywords=keywords, max_results=max_results, enrich_websites=enrich,
     )
     with st.spinner("بنجمع الداتا ونفلترها ونقيّمها..."):
         stats = run_search(req, selected)

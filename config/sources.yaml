@@ -57,11 +57,11 @@ sources:
     rate_limit: {min: 2.0, max: 5.0}
 
   google_maps:
-    label: "Google Maps (business listings)"
+    label: "Google Maps — العملاء النهائيين (مصانع/موردين/مصدّرين)"
     module: aol_leadfinder.scrapers.yellow.google_maps
     tier: yellow
-    enabled: false   # Phase 2 — needs Playwright + browsers installed
-    rate_limit: {min: 3.0, max: 7.0}
+    enabled: true   # PRIMARY source for End Customers. Needs: playwright install chromium
+    rate_limit: {min: 1.5, max: 3.5}
 
   yellowpages_eg:
     label: "Yellow Pages Egypt (yellowpages.com.eg)"

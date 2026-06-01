@@ -40,7 +40,7 @@ Search (country / city / category / sources)
 | Tier | Sources | Status |
 |---|---|---|
 | 🟢 **green** | Forwarding Companies ✅ *(343 EG + descriptions)* · Freight Club ✅ *(phones)* · WSD Connect ✅ *(+website/email)* · EgyDir *(JS/AJAX SPA → deferred)* · Kompass EG *(403 → Playwright)* | **rebuilt against verified live DOM** |
-| 🟡 **yellow** | Google Maps, Yellow Pages EG | harder (Playwright + stealth), Phase 2, best-effort |
+| 🟡 **yellow** | **Google Maps ✅ — PRIMARY source for END CUSTOMERS** (manufacturers/importers/exporters by category+role+city; needs `playwright install chromium`) · Yellow Pages EG *(deferred)* | best-effort (real browser) |
 | 🔴 **deferred** | Facebook, Instagram, LinkedIn, Truecaller | **OFF by default**, ToS/legal risk — see below |
 
 The **dummy** source (offline demo data) is enabled so you can see the whole pipeline work without any network.

@@ -22,6 +22,7 @@ class SearchRequest:
     governorate: Optional[str] = None
     city: Optional[str] = None
     category: Optional[str] = None
+    role: Optional[str] = None  # business role for query building (Manufacturer/Importer/...)
     keywords: list[str] = field(default_factory=list)
     max_results: int = 100
     enrich_websites: bool = False
