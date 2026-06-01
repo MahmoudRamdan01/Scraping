@@ -1,0 +1,57 @@
+"""Merge policy: explicit priority, exact name+city only, no fuzzy.
+
+The dangerous case this guards is a *false merge* — two genuinely different
+companies collapsed into one. Exact normalised name+city must merge; the same
+name in a different city must stay separate.
+"""
+from sqlmodel import Session
+
+from aol_leadfinder.pipeline.dedup import MERGE_PRIORITY, match_keys
+from aol_leadfinder.pipeline.normalize import normalize_lead
+from aol_leadfinder.scrapers.base import RawLead
+from aol_leadfinder.storage.db import get_engine, init_db, read_all_leads, upsert_lead
+
+
+def _engine():
+    engine = get_engine(":memory:")
+    init_db(engine)
+    return engine
+
+
+def test_merge_priority_is_explicit_and_ordered():
+    assert MERGE_PRIORITY == ("phone_e164", "domain", "name_city")
+
+
+def test_match_keys_emits_present_keys_in_priority_order():
+    full = normalize_lead(
+        RawLead(company_name="Acme", source="egydir", phone_raw="01012345678", website="acme.example")
+    )
+    assert [k for k, _ in match_keys(full)] == ["phone_e164", "domain", "name_city"]
+
+    # A name-only record emits just the weakest key.
+    bare = normalize_lead(RawLead(company_name="Acme", source="egydir", city="Cairo"))
+    assert [k for k, _ in match_keys(bare)] == ["name_city"]
+
+
+def test_same_name_and_city_merges_without_phone_or_domain():
+    engine = _engine()
+    with Session(engine) as session:
+        upsert_lead(session, normalize_lead(RawLead(company_name="Nile Foods", source="egydir", city="Cairo")))
+        _, created = upsert_lead(
+            session, normalize_lead(RawLead(company_name="Nile Foods", source="yellowpages_eg", city="Cairo"))
+        )
+        session.commit()
+        assert created is False
+    assert len(read_all_leads(engine)) == 1
+
+
+def test_same_name_different_city_stays_separate():
+    engine = _engine()
+    with Session(engine) as session:
+        upsert_lead(session, normalize_lead(RawLead(company_name="Royal Pharma", source="egydir", city="Cairo")))
+        _, created = upsert_lead(
+            session, normalize_lead(RawLead(company_name="Royal Pharma", source="egydir", city="Alexandria"))
+        )
+        session.commit()
+        assert created is True  # different city -> distinct company, no false merge
+    assert len(read_all_leads(engine)) == 2
