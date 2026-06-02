@@ -20,6 +20,8 @@ from ..http import fetch_html
 
 _FREIGHT_HINTS = ("freight", "forward", "logistic", "customs", "truck", "shipping", "cargo", "clearance")
 _ONCLICK_RE = re.compile(r"window\.location\s*=\s*'([^']+)'")
+# Location items can carry a "+N more" ports badge — strip it before parsing.
+_MORE_RE = re.compile(r"\s*\+\d+\s*more\s*$", re.I)
 _SOCIAL = ("facebook", "twitter", "linkedin", "youtube", "instagram", "google", "whatsapp", "pinterest", "t.me")
 
 
@@ -39,7 +41,9 @@ class WsdConnectScraper(BaseScraper):
     LISTING_SELECTOR = "div.listing-card"
     NAME_SELECTOR = ".listing-company-name"
     CATEGORY_SELECTOR = ".listing-category-tag"
-    LOCATION_SELECTOR = ".listing-meta"
+    # .listing-meta now wraps several .listing-item rows (location, services,
+    # ports) — the first one is the location; the rest must not leak into it.
+    LOCATION_SELECTOR = ".listing-meta .listing-item"
 
     MAX_PAGES = 20
     GIVE_UP_AFTER_EMPTY = 6
@@ -116,6 +120,8 @@ class WsdConnectScraper(BaseScraper):
                 break
 
             location = _text(card.select_one(cls.LOCATION_SELECTOR))
+            if location:
+                location = _MORE_RE.sub("", location).strip() or None
             city = country = None
             if location and "," in location:
                 parts = [p.strip() for p in location.split(",")]
