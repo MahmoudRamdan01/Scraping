@@ -19,6 +19,7 @@ from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
 from ..pipeline.normalize import normalize_lead
 from ..pipeline.score import score_lead
+from ..pipeline.validate import validate_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
 from ..storage.db import get_engine, init_db, upsert_lead
@@ -32,9 +33,11 @@ class RunStats:
     found: int = 0
     kept: int = 0
     dropped: int = 0
+    quarantined: int = 0
     created: int = 0
     updated: int = 0
     drop_reasons: dict[str, int] = field(default_factory=dict)
+    quarantine_reasons: dict[str, int] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     run_id: Optional[int] = None
 
@@ -42,6 +45,11 @@ class RunStats:
         self.dropped += 1
         key = reason or "unknown"
         self.drop_reasons[key] = self.drop_reasons.get(key, 0) + 1
+
+    def quarantine(self, reason: Optional[str]) -> None:
+        self.quarantined += 1
+        key = reason or "unknown"
+        self.quarantine_reasons[key] = self.quarantine_reasons.get(key, 0) + 1
 
 
 def _enrich_website(norm, region: str = "EG") -> None:
@@ -136,6 +144,15 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
                     # Optional deep website crawl (fills phone/email/type/intent)
                     if req.enrich_websites and norm.website:
                         _enrich_website(norm, settings.default_region)
+                    # Structural validation BEFORE quality filters: broken data
+                    # (no identity / no contact / bad phone) is quarantined — kept
+                    # for review, excluded from the working list — never silently
+                    # dropped and never allowed to pollute real leads.
+                    valid, vreason = validate_lead(norm)
+                    if not valid:
+                        upsert_lead(session, norm, run.id, quarantine_reason=vreason)
+                        stats.quarantine(vreason)
+                        continue
                     ok, reason = passes_filters(norm, filters)
                     if not ok:
                         stats.drop(reason)

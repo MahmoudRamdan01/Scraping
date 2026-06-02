@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..pipeline.dedup import match_keys
 from ..pipeline.normalize import NormalizedLead
-from .models import Lead, Run
+from .models import QUARANTINE_STATUS, Lead, Run
 
 # Fields merged from a new sighting into an existing lead (fill blanks only).
 _MERGE_FIELDS = (
@@ -32,6 +32,7 @@ _MIGRATION_COLUMNS = {
     "target_markets": "JSON",
     "enriched": "INTEGER",
     "sources_seen": "TEXT",
+    "quarantine_reason": "TEXT",
 }
 
 
@@ -86,8 +87,20 @@ def _find_existing(session: Session, n: NormalizedLead) -> Optional[Lead]:
     return None
 
 
-def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = None) -> tuple[Lead, bool]:
-    """Insert a new lead or merge into an existing one. Returns (lead, created)."""
+def upsert_lead(
+    session: Session,
+    n: NormalizedLead,
+    run_id: Optional[int] = None,
+    *,
+    quarantine_reason: Optional[str] = None,
+) -> tuple[Lead, bool]:
+    """Insert a new lead or merge into an existing one. Returns (lead, created).
+
+    ``quarantine_reason`` (set when the record failed structural validation) only
+    takes effect on INSERT: a brand-new broken record is stored as quarantined.
+    On MERGE it is intentionally ignored so a broken sighting can never downgrade
+    an existing good lead — it merely contributes provenance/blank fields.
+    """
     existing = _find_existing(session, n)
     if existing is not None:
         for fld in _MERGE_FIELDS:
@@ -149,16 +162,29 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         score=n.score,
         tier=n.tier,
         score_reasons=(n.score_reasons or None),
-        status="new",
+        status=QUARANTINE_STATUS if quarantine_reason else "new",
+        quarantine_reason=quarantine_reason,
         run_id=run_id,
     )
     session.add(lead)
     return lead, True
 
 
-def read_all_leads(engine) -> list[Lead]:
+def read_all_leads(engine, *, include_quarantined: bool = False) -> list[Lead]:
+    """Working lead list (highest score first). Quarantined records are excluded
+    by default; pass ``include_quarantined=True`` to see everything."""
     with Session(engine) as session:
-        return list(session.exec(select(Lead).order_by(Lead.score.desc())).all())
+        stmt = select(Lead)
+        if not include_quarantined:
+            stmt = stmt.where(Lead.status != QUARANTINE_STATUS)
+        return list(session.exec(stmt.order_by(Lead.score.desc())).all())
+
+
+def read_quarantined(engine) -> list[Lead]:
+    """Structurally-invalid records held for review (most recent first)."""
+    with Session(engine) as session:
+        stmt = select(Lead).where(Lead.status == QUARANTINE_STATUS).order_by(Lead.updated_at.desc())
+        return list(session.exec(stmt).all())
 
 
 def update_lead_crm(engine, lead_id: int, **fields) -> bool:

@@ -32,6 +32,11 @@ STATUS_LABELS_AR = {
 # Statuses that count as "engaged" when computing conversion rate.
 ENGAGED_STATUSES = ["contacted", "interested", "quotation_sent", "negotiation", "won"]
 
+# Sentinel status for structurally-invalid records: kept for review but excluded
+# from the working lead list and conversion math. Intentionally NOT part of
+# LEAD_STATUSES (the sales pipeline) so it never pollutes funnel metrics.
+QUARANTINE_STATUS = "quarantined"
+
 
 class Lead(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -76,6 +81,7 @@ class Lead(SQLModel, table=True):
 
     # ---- CRM fields ----
     status: str = "new"
+    quarantine_reason: Optional[str] = None  # set only when status == QUARANTINE_STATUS
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     last_contact_date: Optional[date] = None
