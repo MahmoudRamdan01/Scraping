@@ -35,6 +35,11 @@ _MIGRATION_COLUMNS = {
     "quarantine_reason": "TEXT",
 }
 
+# Columns added to the run table after v1 (Sprint A per-source observability).
+_RUN_MIGRATION_COLUMNS = {
+    "source_stats": "JSON",
+}
+
 
 def _merge_sources_seen(existing_seen: Optional[str], new_source: Optional[str]) -> Optional[str]:
     """Append-only union of source keys, comma-joined and sorted (stable, dedup'd)."""
@@ -64,17 +69,19 @@ def get_engine(db_path: Path | str):
 
 
 def _ensure_columns(engine) -> None:
-    """Idempotent migration: add CRM/score columns to an existing leads table."""
+    """Idempotent migration: add new columns to existing lead/run tables."""
     insp = inspect(engine)
-    if "lead" not in insp.get_table_names():
-        return
-    existing = {col["name"] for col in insp.get_columns("lead")}
-    missing = {c: t for c, t in _MIGRATION_COLUMNS.items() if c not in existing}
-    if not missing:
-        return
-    with engine.begin() as conn:
-        for col, coltype in missing.items():
-            conn.execute(text(f"ALTER TABLE lead ADD COLUMN {col} {coltype}"))
+    names = set(insp.get_table_names())
+    for table, columns in (("lead", _MIGRATION_COLUMNS), ("run", _RUN_MIGRATION_COLUMNS)):
+        if table not in names:
+            continue
+        existing = {col["name"] for col in insp.get_columns(table)}
+        missing = {c: t for c, t in columns.items() if c not in existing}
+        if not missing:
+            continue
+        with engine.begin() as conn:
+            for col, coltype in missing.items():
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
 
 
 def init_db(engine) -> None:

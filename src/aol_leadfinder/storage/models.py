@@ -104,3 +104,7 @@ class Run(SQLModel, table=True):
     updated: int = 0
     status: str = "running"
     error: Optional[str] = None
+    # Per-source observability breakdown (Sprint A). Shape:
+    # {source_key: {found, kept, dropped, quarantined, errors, error, health}}.
+    # Stored as JSON so adding it stays a purely additive schema change.
+    source_stats: Optional[dict] = Field(default=None, sa_column=Column(JSON))
