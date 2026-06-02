@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..pipeline.dedup import match_keys
 from ..pipeline.normalize import NormalizedLead
-from .models import QUARANTINE_STATUS, Lead, Run
+from .models import QUARANTINE_STATUS, Lead
 
 # Fields merged from a new sighting into an existing lead (fill blanks only).
 _MERGE_FIELDS = (
