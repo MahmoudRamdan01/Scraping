@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..pipeline.dedup import match_keys
 from ..pipeline.normalize import NormalizedLead
-from .models import QUARANTINE_STATUS, Lead
+from .models import QUARANTINE_STATUS, Lead, Run
 
 # Fields merged from a new sighting into an existing lead (fill blanks only).
 _MERGE_FIELDS = (
@@ -197,6 +197,13 @@ def read_all_leads(engine, *, include_quarantined: bool = False) -> list[Lead]:
         if not include_quarantined:
             stmt = stmt.where(Lead.status != QUARANTINE_STATUS)
         return list(session.exec(stmt.order_by(Lead.score.desc())).all())
+
+
+def read_runs(engine, *, limit: int = 100) -> list[Run]:
+    """Recent runs, newest first — feeds the Dashboard source-health panel."""
+    with Session(engine) as session:
+        stmt = select(Run).order_by(Run.started_at.desc()).limit(limit)
+        return list(session.exec(stmt).all())
 
 
 def read_quarantined(engine) -> list[Lead]:

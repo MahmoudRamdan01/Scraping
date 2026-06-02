@@ -3,6 +3,7 @@
 Covers the persistence substrate (item 3) and the orchestrator-level per-source
 metrics + health classification (items 1-2).
 """
+from datetime import datetime, timedelta
 from typing import Iterator
 
 from sqlalchemy import text
@@ -129,3 +130,18 @@ def test_looks_blocked():
     assert _looks_blocked("HTTP 429 Too Many Requests")
     assert not _looks_blocked("connection reset by peer")
     assert not _looks_blocked(None)
+
+
+def test_read_runs_newest_first(tmp_path):
+    from aol_leadfinder.storage.db import read_runs
+
+    engine = get_engine(tmp_path / "leads.db")
+    init_db(engine)
+    t0 = datetime(2026, 1, 1, 10, 0, 0)
+    with Session(engine) as s:
+        s.add(Run(status="done", started_at=t0, source_stats={"a": {"found": 1, "kept": 1, "health": "ok"}}))
+        s.add(Run(status="done", started_at=t0 + timedelta(hours=1),
+                  source_stats={"a": {"found": 0, "kept": 0, "health": "empty"}}))
+        s.commit()
+    runs = read_runs(engine, limit=10)
+    assert [r.started_at for r in runs] == [t0 + timedelta(hours=1), t0]
