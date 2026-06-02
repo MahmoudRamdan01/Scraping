@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..pipeline.dedup import match_keys
@@ -48,7 +48,19 @@ _CRM_FIELDS = {"status", "notes", "assigned_to", "last_contact_date", "next_foll
 
 
 def get_engine(db_path: Path | str):
-    return create_engine(f"sqlite:///{db_path}", echo=False)
+    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _record):
+        # WAL lets the Streamlit UI keep reading while a search run writes
+        # (default rollback journal locks them against each other); busy_timeout
+        # makes a contended connection wait instead of erroring "database is locked".
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
+
+    return engine
 
 
 def _ensure_columns(engine) -> None:
