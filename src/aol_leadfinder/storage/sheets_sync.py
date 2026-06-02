@@ -10,7 +10,6 @@ import os
 
 import pandas as pd
 
-from ..config import get_settings
 from ..logging_setup import get_logger
 
 log = get_logger("sheets")
