@@ -34,6 +34,7 @@ _COLUMNS = [
     ("assigned_to", "Assigned To", 14),
     ("next_followup_date", "Next Follow-up", 15),
     ("source", "Source", 16),
+    ("sources_seen", "All Sources", 24),
     ("source_url", "Source URL", 30),
 ]
 

@@ -12,7 +12,7 @@ for _p in pathlib.Path(__file__).resolve().parents:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from aol_leadfinder.storage.db import read_all_leads  # noqa: E402
+from aol_leadfinder.storage.db import read_all_leads, read_quarantined  # noqa: E402
 from aol_leadfinder.storage.models import ENGAGED_STATUSES, STATUS_LABELS_AR  # noqa: E402
 from aol_leadfinder.ui.common import get_ready_engine  # noqa: E402
 
@@ -61,6 +61,10 @@ c5.metric("Conversion", f"{conversion:.0f}%")
 
 if due:
     st.warning(f"⏰ عندك {due} متابعة مستحقّة النهاردة أو متأخرة — شوف صفحة Leads (فلتر 'متابعات مستحقّة').")
+
+_quarantined = len(read_quarantined(engine))
+if _quarantined:
+    st.caption(f"🚧 {_quarantined} سجل في المراجعة (Quarantine) — مستبعد من الأرقام دي. شوفهم في صفحة Leads.")
 
 st.divider()
 col_a, col_b = st.columns(2)

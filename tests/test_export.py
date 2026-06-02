@@ -18,6 +18,13 @@ def test_dataframe_has_whatsapp_column():
     assert df.iloc[0]["WhatsApp"] == "201001234567"
 
 
+def test_dataframe_surfaces_all_sources_provenance():
+    lead = _lead(source="google_maps", sources_seen="egydir,google_maps")
+    df = leads_to_dataframe([lead])
+    assert "All Sources" in df.columns
+    assert df.iloc[0]["All Sources"] == "egydir,google_maps"
+
+
 def test_export_creates_clickable_links(tmp_path):
     lead = _lead(
         website="https://acme-eg.com",

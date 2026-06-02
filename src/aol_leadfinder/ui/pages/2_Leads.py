@@ -13,7 +13,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from aol_leadfinder.pipeline.score import format_reasons  # noqa: E402
-from aol_leadfinder.storage.db import read_all_leads, update_lead_crm  # noqa: E402
+from aol_leadfinder.storage.db import read_all_leads, read_quarantined, update_lead_crm  # noqa: E402
 from aol_leadfinder.storage.models import STATUS_LABELS_AR  # noqa: E402
 from aol_leadfinder.ui.common import get_ready_engine  # noqa: E402
 
@@ -45,6 +45,29 @@ st.title("📋 العملاء / Leads (CRM)")
 engine = get_ready_engine()
 leads = read_all_leads(engine)
 
+# Broken records held for review — visible, but kept out of the working list.
+quarantined = read_quarantined(engine)
+if quarantined:
+    with st.expander(f"🚧 للمراجعة / Quarantine ({len(quarantined)})"):
+        st.caption("سجلات ناقصة (بدون هوية / تواصل / رقم غير صالح) — متحجوزة ومش داخلة في القوائم.")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Company": q.company_name,
+                        "Reason": q.quarantine_reason,
+                        "Phone": q.phone_e164 or "",
+                        "Email": q.email or "",
+                        "Website": q.website or "",
+                        "Source": q.source or "",
+                    }
+                    for q in quarantined
+                ]
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+
 if not leads:
     st.info("لسه مفيش عملاء. روح صفحة **🔍 Search** وابدأ بحث.")
     st.stop()
@@ -65,6 +88,7 @@ for lead in leads:
             "Type": lead.company_type or "",
             "Intent": lead.shipping_intent,
             "Status": STATUS_LABELS_AR.get(lead.status, lead.status),
+            "Sources": lead.sources_seen or (lead.source or ""),
             "Assigned To": lead.assigned_to or "",
             "Last Contact": lead.last_contact_date,
             "Next Follow-up": lead.next_followup_date,
@@ -108,7 +132,7 @@ edited = st.data_editor(
         "Last Contact": st.column_config.DateColumn("Last Contact"),
         "Next Follow-up": st.column_config.DateColumn("Next Follow-up"),
     },
-    disabled=["Company", "Phone", "City", "Category", "Score", "Tier", "Why", "Type", "Intent"],
+    disabled=["Company", "Phone", "City", "Category", "Score", "Tier", "Why", "Type", "Intent", "Sources"],
     key="leads_editor",
 )
 
