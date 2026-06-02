@@ -67,7 +67,8 @@ sources:
     label: "Yellow Pages Egypt (yellowpages.com.eg)"
     module: aol_leadfinder.scrapers.yellow.yellowpages_eg
     tier: yellow
-    enabled: false   # Phase 2 — Cloudflare protected, best-effort
+    enabled: true   # REAL source — search served via requests; phones from /getPhones/<id>
+    base_url: "https://www.yellowpages.com.eg"
     rate_limit: {min: 4.0, max: 8.0}
 
   facebook:
