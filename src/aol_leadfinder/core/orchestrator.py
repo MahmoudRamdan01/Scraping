@@ -27,6 +27,49 @@ from ..storage.models import Run
 
 log = get_logger("orchestrator")
 
+# Error-message fragments that indicate a source was actively blocked rather than
+# generically crashing. Best-effort: a source is only classified "blocked" when it
+# lets such an error propagate. A source that swallows a block and yields nothing
+# is reported as "empty" — still the actionable signal (see SourceStat.health).
+_BLOCK_SIGNALS = (
+    "403", "429", "forbidden", "captcha", "cloudflare",
+    "blocked", "access denied", "too many requests",
+)
+
+
+def _looks_blocked(error: Optional[str]) -> bool:
+    low = (error or "").lower()
+    return any(sig in low for sig in _BLOCK_SIGNALS)
+
+
+@dataclass
+class SourceStat:
+    """Per-source outcome for a single run (Sprint A observability)."""
+
+    found: int = 0
+    kept: int = 0
+    dropped: int = 0
+    quarantined: int = 0
+    error: Optional[str] = None
+
+    @property
+    def health(self) -> str:
+        """ok = produced leads · empty = ran but nothing · blocked/error = raised."""
+        if self.error:
+            return "blocked" if _looks_blocked(self.error) else "error"
+        return "ok" if self.found > 0 else "empty"
+
+    def as_dict(self) -> dict:
+        return {
+            "found": self.found,
+            "kept": self.kept,
+            "dropped": self.dropped,
+            "quarantined": self.quarantined,
+            "errors": 1 if self.error else 0,
+            "error": self.error,
+            "health": self.health,
+        }
+
 
 @dataclass
 class RunStats:
@@ -39,7 +82,11 @@ class RunStats:
     drop_reasons: dict[str, int] = field(default_factory=dict)
     quarantine_reasons: dict[str, int] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
+    per_source: dict[str, SourceStat] = field(default_factory=dict)
     run_id: Optional[int] = None
+
+    def source(self, key: str) -> SourceStat:
+        return self.per_source.setdefault(key, SourceStat())
 
     def drop(self, reason: Optional[str]) -> None:
         self.dropped += 1
@@ -127,9 +174,11 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
         stats.run_id = run.id
 
         for key, scraper in scrapers.items():
+            ss = stats.source(key)
             try:
                 for raw in itertools.islice(scraper.search(req), req.max_results):
                     stats.found += 1
+                    ss.found += 1
                     norm = normalize_lead(
                         raw, default_country=settings.default_country, region=settings.default_region
                     )
@@ -152,21 +201,25 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
                     if not valid:
                         upsert_lead(session, norm, run.id, quarantine_reason=vreason)
                         stats.quarantine(vreason)
+                        ss.quarantined += 1
                         continue
                     ok, reason = passes_filters(norm, filters)
                     if not ok:
                         stats.drop(reason)
+                        ss.dropped += 1
                         continue
                     score, tier, reasons = score_lead(norm, scoring)
                     norm.score, norm.tier, norm.score_reasons = score, tier, reasons
                     _, created = upsert_lead(session, norm, run.id)
                     stats.kept += 1
+                    ss.kept += 1
                     stats.created += int(created)
                     stats.updated += int(not created)
                 session.commit()
             except Exception as exc:  # noqa: BLE001 - isolate per-source failures
                 log.exception("source '%s' failed", key)
                 stats.errors[key] = str(exc)
+                ss.error = str(exc)
                 session.rollback()
 
         run.found = stats.found
@@ -174,6 +227,7 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
         run.dropped = stats.dropped
         run.created = stats.created
         run.updated = stats.updated
+        run.source_stats = {key: s.as_dict() for key, s in stats.per_source.items()}
         run.status = "done_with_errors" if stats.errors else "done"
         run.error = "; ".join(f"{k}: {v}" for k, v in stats.errors.items()) or None
         run.finished_at = datetime.utcnow()
