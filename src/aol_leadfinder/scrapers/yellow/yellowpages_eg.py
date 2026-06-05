@@ -30,6 +30,19 @@ from ..http import fetch_html
 _ID_RE = re.compile(r"/profile/[^/]+/(\d+)")
 _PHONEISH_RE = re.compile(r"[\d\-+()\s]{7,}")
 
+# Curated YP search terms per category. YP search is keyword-AND-ish: bare names
+# pull in retail and appending a role over-narrows (both checked live), so these
+# terms were validated against the live site to surface manufacturers/producers.
+# Unmapped categories fall back to the (English) category name.
+_CATEGORY_QUERY = {
+    "Pharmaceuticals": "pharmaceutical industries",
+    "Food Suppliers": "food industries",
+    "Plastics": "plastic industries",
+    "Textiles": "textile",
+    "Chemicals": "chemical industries",
+    "Engineering Industries": "engineering industries",
+}
+
 
 def _text(el) -> Optional[str]:
     return el.get_text(" ", strip=True) if el else None
@@ -65,10 +78,32 @@ class YellowPagesEgScraper(BaseScraper):
 
     @staticmethod
     def _query(req: SearchRequest) -> str:
-        for term in (*(req.keywords or []), req.category, req.role):
+        """Best YP search term: a curated end-customer term or the (English)
+        category name, falling back to a keyword/role. The role is intentionally
+        not appended — YP's AND-ish search over-narrows when it is."""
+        if req.category and req.category.strip():
+            cat = req.category.strip()
+            return _CATEGORY_QUERY.get(cat, cat)
+        for term in (*(req.keywords or []), req.role):
             if term and term.strip():
                 return term.strip()
         return ""
+
+    @staticmethod
+    def _wanted_location(req: SearchRequest) -> list[str]:
+        """Target location tokens. The UI puts the target (a city OR a
+        governorate) in either field, so both are one location constraint."""
+        return [t for t in ((req.city or "").strip().lower(), (req.governorate or "").strip().lower()) if t]
+
+    @staticmethod
+    def _location_ok(lead: RawLead, wanted: list[str]) -> bool:
+        """Keep a lead when every requested token appears in its city OR
+        governorate — so 'Giza' matches a Giza-governorate lead whose city is
+        '6th of October', which the old city-only filter silently dropped."""
+        if not wanted:
+            return True
+        hay = f"{lead.city or ''} {lead.governorate or ''}".lower()
+        return all(tok in hay for tok in wanted)
 
     def _search_url(self, query: str, page: int) -> str:
         base = f"{self._base_url()}/en/search/{quote(query, safe='')}"
@@ -86,8 +121,7 @@ class YellowPagesEgScraper(BaseScraper):
         query = self._query(req)
         if not query:
             return
-        want_gov = (req.governorate or "").strip().lower()
-        want_city = (req.city or "").strip().lower()
+        wanted = self._wanted_location(req)
         seen: set[str] = set()
         emitted = 0
         empty_streak = 0
@@ -105,9 +139,7 @@ class YellowPagesEgScraper(BaseScraper):
                 if key in seen:
                     continue
                 seen.add(key)
-                if want_gov and want_gov not in (lead.governorate or "").lower():
-                    continue
-                if want_city and want_city not in (lead.city or "").lower():
+                if not self._location_ok(lead, wanted):
                     continue
                 new_on_page += 1
 

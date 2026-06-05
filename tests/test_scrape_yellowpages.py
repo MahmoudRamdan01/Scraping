@@ -1,3 +1,4 @@
+from aol_leadfinder.scrapers.base import RawLead, SearchRequest
 from aol_leadfinder.scrapers.yellow.yellowpages_eg import YellowPagesEgScraper
 
 
@@ -54,3 +55,34 @@ def test_parse_phones_dedupes_and_survives_garbage():
     ]
     assert YellowPagesEgScraper.parse_phones("not json") == []
     assert YellowPagesEgScraper.parse_phones("[]") == []
+
+
+def test_query_prefers_curated_then_category_name():
+    q = YellowPagesEgScraper._query
+    # mapped category -> validated end-customer term
+    assert q(SearchRequest(category="Pharmaceuticals")) == "pharmaceutical industries"
+    # unmapped category -> English name; role is NOT appended (YP over-narrows)
+    assert q(SearchRequest(category="Cosmetics", role="Manufacturer")) == "Cosmetics"
+    # no category -> first keyword, else role, else empty
+    assert q(SearchRequest(keywords=["furniture"], role="Factory")) == "furniture"
+    assert q(SearchRequest(role="Importer")) == "Importer"
+    assert q(SearchRequest()) == ""
+
+
+def test_location_filter_matches_city_or_governorate():
+    giza = RawLead(company_name="A", source="yellowpages_eg", city="6th of october", governorate="Giza")
+    cairo = RawLead(company_name="B", source="yellowpages_eg", city="Nasr city", governorate="Cairo")
+    # 'Giza' entered as the location keeps a Giza-governorate lead whose city is a
+    # district — the old city-only filter dropped it.
+    wanted = YellowPagesEgScraper._wanted_location(SearchRequest(city="Giza"))
+    assert YellowPagesEgScraper._location_ok(giza, wanted) is True
+    assert YellowPagesEgScraper._location_ok(cairo, wanted) is False
+    # no location constraint -> everything passes
+    assert YellowPagesEgScraper._location_ok(cairo, []) is True
+
+
+def test_search_url_pagination_and_encoding():
+    s = YellowPagesEgScraper({"base_url": "https://www.yellowpages.com.eg"})
+    assert s._search_url("cosmetics", 1) == "https://www.yellowpages.com.eg/en/search/cosmetics"
+    assert s._search_url("cosmetics", 2) == "https://www.yellowpages.com.eg/en/search/cosmetics/p2"
+    assert s._search_url("plastic industries", 3).endswith("/en/search/plastic%20industries/p3")
