@@ -56,6 +56,14 @@ sources:
     base_url: "https://forwardingcompanies.com"
     rate_limit: {min: 2.0, max: 5.0}
 
+  textile_council:
+    label: "Textile Export Council of Egypt (textile-egypt.org)"
+    module: aol_leadfinder.scrapers.green.textile_council
+    tier: green
+    enabled: true   # REAL source — ~150 verified textile manufacturers/exporters (END CUSTOMERS); contacts on member pages
+    base_url: "https://textile-egypt.org/textile-egypt.org"
+    rate_limit: {min: 2.0, max: 5.0}
+
   google_maps:
     label: "Google Maps — العملاء النهائيين (مصانع/موردين/مصدّرين)"
     module: aol_leadfinder.scrapers.yellow.google_maps
