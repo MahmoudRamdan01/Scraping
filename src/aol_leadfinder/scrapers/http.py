@@ -27,6 +27,8 @@ HEADERS = {
 
 _PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,}\d)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# Cloudflare email obfuscation: <a data-cfemail="HEX">, first byte = XOR key.
+_CF_EMAIL_RE = re.compile(r'data-cfemail="([0-9a-fA-F]{6,})"')
 # wa.me/<num>, api.whatsapp.com/send?phone=<num>, whatsapp://send?phone=<num>
 _WHATSAPP_RE = re.compile(
     r"(?:wa\.me/|whatsapp\.com/send\?phone=|whatsapp://send\?phone=)\+?(\d{6,15})", re.I
@@ -170,4 +172,27 @@ def extract_emails_from_html(html: str) -> list[str]:
         add(a["href"][7:].split("?")[0])
     for match in _EMAIL_RE.findall(soup.get_text(" ", strip=True)):
         add(match)
+    for email in decode_cf_emails(html):
+        add(email)
+    return out
+
+
+def decode_cf_emails(html: str) -> list[str]:
+    """Recover Cloudflare-obfuscated emails (``data-cfemail`` hex).
+
+    Cloudflare replaces an email with a hex string whose first byte is an XOR
+    key for the remaining bytes. Many directories (e.g. council member pages)
+    hide emails this way, so decoding them keeps a real contact instead of the
+    ``[email protected]`` placeholder.
+    """
+    out: list[str] = []
+    for hexstr in _CF_EMAIL_RE.findall(html):
+        try:
+            raw = bytes.fromhex(hexstr)
+            key = raw[0]
+            email = "".join(chr(b ^ key) for b in raw[1:])
+        except (ValueError, IndexError):
+            continue
+        if "@" in email and email not in out:
+            out.append(email)
     return out

@@ -64,6 +64,14 @@ sources:
     base_url: "https://textile-egypt.org/textile-egypt.org"
     rate_limit: {min: 2.0, max: 5.0}
 
+  aece:
+    label: "Apparel Export Council of Egypt (aecegy.com)"
+    module: aol_leadfinder.scrapers.green.aece
+    tier: green
+    enabled: true   # REAL source — ~170 apparel/garment manufacturers (END CUSTOMERS); contacts on member pages
+    base_url: "https://aecegy.com"
+    rate_limit: {min: 2.0, max: 5.0}
+
   google_maps:
     label: "Google Maps — العملاء النهائيين (مصانع/موردين/مصدّرين)"
     module: aol_leadfinder.scrapers.yellow.google_maps
