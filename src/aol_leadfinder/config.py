@@ -32,6 +32,16 @@ def _env_path(name: str, default: Path) -> Path:
     return Path(val).expanduser() if val else default
 
 
+def _env_int(name: str, default: int) -> int:
+    val = os.environ.get(name)
+    if val in (None, ""):
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 @lru_cache(maxsize=1)
 def _load_dotenv_once() -> None:
     if load_dotenv is not None:
@@ -47,6 +57,12 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: _env_path("AOL_DATA_DIR", REPO_ROOT / "data"))
     default_country: str = "Egypt"
     default_region: str = "EG"
+
+    # Google Sheet sync target (autopilot append-only). Empty sheet_id => not configured.
+    sheet_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_SHEET_ID", ""))
+    sheet_tab: str = field(default_factory=lambda: os.environ.get("GOOGLE_SHEET_TAB", "Sales_Review"))
+    # Search concurrency. Default 1 => the legacy sequential path (keeps tests deterministic).
+    max_workers: int = field(default_factory=lambda: _env_int("AOL_MAX_WORKERS", 1))
 
     @property
     def db_path(self) -> Path:

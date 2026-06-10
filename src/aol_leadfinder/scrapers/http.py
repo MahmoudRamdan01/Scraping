@@ -7,15 +7,18 @@ returns only valid E.164 numbers (WhatsApp/tel first). This avoids the classic
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 import phonenumbers
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 
 HEADERS = {
     "User-Agent": (
@@ -52,6 +55,76 @@ def _insecure_default() -> bool:
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
+# ---- Optional connection pooling + on-disk cache (both env-gated, OFF by default) ----
+# When AOL_HTTP_POOL is unset the GET goes through a bare ``requests.get`` exactly as
+# before, so the retry tests (which patch ``http.requests.get``) are unaffected. The
+# pool + cache only activate for the autopilot / concurrent runs that set the env vars.
+_SESSION: Optional[requests.Session] = None
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _session() -> requests.Session:
+    """Lazily build a shared, thread-safe Session with a connection pool."""
+    global _SESSION
+    if _SESSION is None:
+        sess = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        sess.mount("http://", adapter)
+        sess.mount("https://", adapter)
+        _SESSION = sess
+    return _SESSION
+
+
+def _do_get(url: str, **kwargs):
+    """One GET: pooled Session when AOL_HTTP_POOL is set, else a bare requests.get."""
+    if _env_flag("AOL_HTTP_POOL"):
+        return _session().get(url, **kwargs)
+    return requests.get(url, **kwargs)
+
+
+def _cache_dir() -> Optional[Path]:
+    d = os.environ.get("AOL_HTTP_CACHE_DIR")
+    return Path(d) if d else None
+
+
+def _cache_ttl() -> float:
+    try:
+        return float(os.environ.get("AOL_HTTP_CACHE_TTL", "86400"))
+    except (TypeError, ValueError):
+        return 86400.0
+
+
+def _cache_file(cache_dir: Path, url: str) -> Path:
+    return cache_dir / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".html")
+
+
+def _cache_read(url: str) -> Optional[str]:
+    cdir = _cache_dir()
+    if not cdir:
+        return None
+    path = _cache_file(cdir, url)
+    try:
+        if path.exists() and (time.time() - path.stat().st_mtime) < _cache_ttl():
+            return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return None
+
+
+def _cache_write(url: str, text: str) -> None:
+    cdir = _cache_dir()
+    if not cdir:
+        return
+    try:
+        cdir.mkdir(parents=True, exist_ok=True)
+        _cache_file(cdir, url).write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def fetch_html(
     url: str,
     timeout: int = 20,
@@ -75,10 +148,14 @@ def fetch_html(
 
         urllib3.disable_warnings()
 
+    cached = _cache_read(url)
+    if cached is not None:
+        return cached
+
     last_exc: Optional[Exception] = None
     for attempt in range(retries + 1):
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=verify)
+            resp = _do_get(url, headers=HEADERS, timeout=timeout, verify=verify)
         except requests.RequestException as exc:
             # Connection reset, DNS failure, timeout, etc.
             last_exc = exc
@@ -95,6 +172,7 @@ def fetch_html(
         # 200 -> return; non-retryable 4xx or a final-attempt 5xx -> raise here
         # (outside the network except, so HTTPError is never re-caught as transient).
         resp.raise_for_status()
+        _cache_write(url, resp.text)
         return resp.text
 
     raise last_exc if last_exc is not None else RuntimeError(f"fetch_html failed for {url}")
