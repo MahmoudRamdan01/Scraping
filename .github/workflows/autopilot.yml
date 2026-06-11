@@ -17,6 +17,18 @@ on:
         description: "Scrape + score but do NOT write to the sheet"
         type: boolean
         default: false
+      no_enrich:
+        description: "Skip website enrichment (much faster — good for a quick test)"
+        type: boolean
+        default: false
+      limit_segments:
+        description: "Max directory segments (blank = daily default; use 1 for a quick test)"
+        type: string
+        default: ""
+      max_results:
+        description: "Per-source result cap (blank = config default)"
+        type: string
+        default: ""
 
 concurrency:
   group: autopilot
@@ -67,11 +79,13 @@ jobs:
           AOL_MAPS_SCROLL_PAUSE_MS: "900"
           AOL_MAPS_DETAIL_PAUSE_MS: "900"
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            aol-autopilot --dry-run
-          else
-            aol-autopilot
-          fi
+          ARGS=""
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          [ "${{ github.event.inputs.no_enrich }}" = "true" ] && ARGS="$ARGS --no-enrich"
+          [ -n "${{ github.event.inputs.limit_segments }}" ] && ARGS="$ARGS --limit-segments ${{ github.event.inputs.limit_segments }}"
+          [ -n "${{ github.event.inputs.max_results }}" ] && ARGS="$ARGS --max-results ${{ github.event.inputs.max_results }}"
+          echo "running: aol-autopilot$ARGS"
+          aol-autopilot $ARGS
 
       - name: Upload leads database (for download/backup)
         if: always()
