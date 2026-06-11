@@ -15,6 +15,13 @@ from aol_leadfinder.config import get_categories  # noqa: E402
 from aol_leadfinder.core.orchestrator import run_search  # noqa: E402
 from aol_leadfinder.scrapers import registry  # noqa: E402
 from aol_leadfinder.scrapers.base import SearchRequest  # noqa: E402
+from aol_leadfinder.storage.db import mark_pushed_to_sheet, read_all_leads  # noqa: E402
+from aol_leadfinder.storage.sheets_sync import (  # noqa: E402
+    SheetsNotConfigured,
+    append_new_leads,
+    is_configured,
+)
+from aol_leadfinder.ui.common import get_ready_engine  # noqa: E402
 
 st.set_page_config(page_title="Search — Air Ocean Lead Finder", page_icon="🔍", layout="wide")
 st.title("🔍 بحث / Search")
@@ -61,6 +68,11 @@ st.caption(
 enrich = st.checkbox(
     "🔎 حلّل مواقع الشركات (Company Intelligence) — أبطأ، بيقيّم نوع الشركة ونية الشحن",
     value=False,
+)
+auto_sheet = st.checkbox(
+    "📤 ابعت الـ leads الجديدة لجوجل شيت تلقائيًا بعد البحث",
+    value=is_configured(),
+    help="بيضيف الجديد بس في تاب Sales_Review (deduped ضد الماستر). محتاج GOOGLE_SHEET_ID + المفتاح في .env",
 )
 
 sources = registry.available_sources()
@@ -125,4 +137,27 @@ if st.button("🚀 ابدأ البحث / Run", type="primary"):
         st.write("**أسباب الاستبعاد:**", drop_reasons)
     if errors:
         st.error(f"مصادر فشلت: {errors}")
+
+    # Auto-push the new leads straight to Google Sheets (append-only, deduped).
+    if auto_sheet:
+        if is_configured():
+            with st.spinner("بنبعت الجديد لجوجل شيت..."):
+                try:
+                    engine = get_ready_engine()
+                    res = append_new_leads(read_all_leads(engine))
+                    if res.appended:
+                        mark_pushed_to_sheet(engine, [lead.id for lead in res.leads])
+                    st.success(
+                        f"📤 اتبعت للشيت ✅ {res.appended} جديد (تخطّينا {res.skipped} موجودين) — {res.url}"
+                    )
+                except SheetsNotConfigured as exc:
+                    st.warning(f"الشيت مش متظبط: {exc}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"فشل إرسال الشيت: {exc}")
+        else:
+            st.warning(
+                "📤 الشيت مش متظبط — حط `GOOGLE_SHEET_ID` والمفتاح (`GOOGLE_SHEETS_CRED` أو "
+                "`GOOGLE_SHEETS_CRED_JSON`) و`GOOGLE_SHEET_DEDUP_TABS=Leads` في ملف `.env`."
+            )
+
     st.info("افتح صفحة **📋 Leads** من القائمة الجانبية لرؤية النتائج وتحديث الحالات.")
