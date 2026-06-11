@@ -18,10 +18,17 @@ from typing import Optional
 from bs4 import BeautifulSoup
 
 # Signals that indicate a company *type* (Arabic + English).
+#
+# "Freight Forwarder" is intentionally NARROW: only forwarder-/customs-specific
+# terms, NOT bare "shipping/شحن" or "logistics" — those appear on every factory or
+# shop that *ships its products* and were the root cause of product companies being
+# mislabelled as forwarders (i.e. as our competitors). Generic shipping words live
+# in INTENT_SIGNALS instead, where they correctly signal a *customer* who ships.
 COMPANY_TYPE_SIGNALS: dict[str, list[str]] = {
     "Freight Forwarder": [
-        "freight", "forwarder", "forwarding", "logistics", "customs clearance",
-        "شحن", "تخليص", "لوجستيات", "شحن دولي",
+        "freight forwarder", "freight forwarding", "forwarder", "forwarding agent",
+        "customs clearance", "customs broker", "customs brokerage", "nvocc",
+        "bill of lading", "تخليص جمركي", "تخليص", "شحن دولي", "وكيل شحن", "ملاحة",
     ],
     "Manufacturer": [
         "manufacturer", "manufacturing", "factory", "we produce", "our factory",
@@ -38,6 +45,17 @@ COMPANY_TYPE_SIGNALS: dict[str, list[str]] = {
         "woocommerce", "salla", "zid", "متجر إلكتروني", "اطلب الآن", "أضف إلى السلة", "سلة", "زد",
     ],
 }
+
+# Customer types — the businesses Air Ocean SELLS to (they need shipping).
+_CUSTOMER_TYPES = ("Manufacturer", "Exporter", "Importer", "Distributor", "Ecommerce")
+# Unambiguous "we ARE a forwarder/logistics provider" terms. Only these keep the
+# Freight-Forwarder label when a customer signal is also present (a forwarder is a
+# competitor, not a lead, so we never want to mislabel a real customer as one).
+_STRONG_FORWARDER = (
+    "freight forwarder", "freight forwarding", "forwarding agent", "customs clearance",
+    "customs broker", "customs brokerage", "nvocc", "bill of lading", "تخليص جمركي",
+    "شحن دولي", "وكيل شحن",
+)
 
 # Phrases that signal shipping intent and their weights.
 INTENT_SIGNALS: dict[str, int] = {
@@ -62,6 +80,7 @@ class CompanyIntel:
     shipping_intent: int = 0
     signals: list[str] = field(default_factory=list)
     has_online_store: bool = False
+    is_competitor: bool = False  # True only for genuine freight-forwarder identity
 
 
 def classify_company(text: Optional[str], category: Optional[str] = None) -> CompanyIntel:
@@ -79,6 +98,13 @@ def classify_company(text: Optional[str], category: Optional[str] = None) -> Com
 
     if type_scores:
         company_type = max(type_scores, key=type_scores.get)
+        # Precedence: a customer signal beats a generic forwarder signal unless the
+        # page carries explicit forwarder identity. Stops "we ship our products"
+        # pages from being filed as competitors.
+        if company_type == "Freight Forwarder" and not any(kw in t for kw in _STRONG_FORWARDER):
+            customer_hits = {k: v for k, v in type_scores.items() if k in _CUSTOMER_TYPES}
+            if customer_hits:
+                company_type = max(customer_hits, key=customer_hits.get)
     elif category and ("freight" in category.lower() or "forwarder" in category.lower()):
         company_type = "Freight Forwarder"
     else:
@@ -99,6 +125,7 @@ def classify_company(text: Optional[str], category: Optional[str] = None) -> Com
         shipping_intent=intent,
         signals=sorted(set(matched)),
         has_online_store=has_store,
+        is_competitor=(company_type == "Freight Forwarder"),
     )
 
 

@@ -14,13 +14,14 @@ from typing import Optional
 
 from sqlmodel import Session
 
-from ..config import Settings, get_filters, get_scoring, get_settings
+from ..config import Settings, get_filters, get_scoring, get_segments, get_settings
 from ..enrichment.crawler import crawl_website
 from ..enrichment.intelligence import classify_company
 from ..logging_setup import get_logger
 from ..pipeline.filters import passes_filters
 from ..pipeline.normalize import normalize_lead
 from ..pipeline.score import score_lead
+from ..pipeline.segment import classify_segment
 from ..pipeline.validate import validate_lead
 from ..scrapers import registry
 from ..scrapers.base import SearchRequest
@@ -159,8 +160,10 @@ class ProcessedLead:
     created: Optional[bool] = None  # filled by the DB writer for "keep"
 
 
-def _process_raw(raw, *, settings: Settings, scoring: dict, filters: dict, enrich: bool) -> ProcessedLead:
-    """normalize -> classify -> (optional) enrich -> validate -> filter -> score.
+def _process_raw(
+    raw, *, settings: Settings, scoring: dict, filters: dict, segments: dict, enrich: bool
+) -> ProcessedLead:
+    """normalize -> classify -> (optional) enrich -> validate -> filter -> segment -> score.
 
     Pure: no database, no shared state. Returns the decision; the single DB writer
     applies it. The sequential and concurrent paths both call this, so their
@@ -173,11 +176,13 @@ def _process_raw(raw, *, settings: Settings, scoring: dict, filters: dict, enric
         intel = classify_company(norm.description or "", norm.category)
         norm.company_type = intel.company_type
         norm.shipping_intent = intel.shipping_intent
+        norm.is_competitor = intel.is_competitor
         if intel.has_online_store:
             norm.has_online_store = True
-    # Optional deep website crawl (fills phone/email/type/intent).
+    # Optional deep website crawl (fills phone/email/type/intent/socials/contacts).
     if enrich and norm.website:
         _enrich_website(norm, settings.default_region)
+    norm.is_competitor = norm.is_competitor or (norm.company_type == "Freight Forwarder")
     # Structural validation BEFORE quality filters: broken data (no identity /
     # no contact / bad phone) is quarantined — kept for review, excluded from the
     # working list — never silently dropped and never allowed to pollute real leads.
@@ -187,7 +192,8 @@ def _process_raw(raw, *, settings: Settings, scoring: dict, filters: dict, enric
     ok, reason = passes_filters(norm, filters)
     if not ok:
         return ProcessedLead(norm=norm, outcome="drop", reason=reason)
-    score, tier, reasons = score_lead(norm, scoring)
+    norm.segment = classify_segment(norm, segments)
+    score, tier, reasons = score_lead(norm, scoring, segments=segments)
     norm.score, norm.tier, norm.score_reasons = score, tier, reasons
     return ProcessedLead(norm=norm, outcome="keep")
 
@@ -211,7 +217,7 @@ def _apply_processed(session: Session, processed: ProcessedLead, run_id: Optiona
         stats.updated += int(not created)
 
 
-def _run_sequential(req, scrapers, session, run_id, stats, settings, scoring, filters) -> None:
+def _run_sequential(req, scrapers, session, run_id, stats, settings, scoring, filters, segments) -> None:
     """The original, deterministic path: one source at a time, commit per source.
     Used whenever max_workers <= 1 (all unit tests), so its behaviour is unchanged."""
     for key, scraper in scrapers.items():
@@ -221,7 +227,8 @@ def _run_sequential(req, scrapers, session, run_id, stats, settings, scoring, fi
                 stats.found += 1
                 ss.found += 1
                 processed = _process_raw(
-                    raw, settings=settings, scoring=scoring, filters=filters, enrich=req.enrich_websites
+                    raw, settings=settings, scoring=scoring, filters=filters,
+                    segments=segments, enrich=req.enrich_websites,
                 )
                 _apply_processed(session, processed, run_id, stats, ss)
             session.commit()
@@ -235,7 +242,7 @@ def _run_sequential(req, scrapers, session, run_id, stats, settings, scoring, fi
 _QUEUE_SENTINEL = object()
 
 
-def _run_concurrent(req, scrapers, session, run_id, stats, settings, scoring, filters, max_workers) -> None:
+def _run_concurrent(req, scrapers, session, run_id, stats, settings, scoring, filters, segments, max_workers) -> None:
     """Producer/consumer: scraper threads do scrape+normalize+enrich (no DB) and
     push results onto a queue; THIS (main) thread is the sole DB writer, so SQLite
     never sees concurrent writes. Per-source isolation and counters match the
@@ -249,7 +256,8 @@ def _run_concurrent(req, scrapers, session, run_id, stats, settings, scoring, fi
         try:
             for raw in itertools.islice(scraper.search(req), req.max_results):
                 processed = _process_raw(
-                    raw, settings=settings, scoring=scoring, filters=filters, enrich=req.enrich_websites
+                    raw, settings=settings, scoring=scoring, filters=filters,
+                    segments=segments, enrich=req.enrich_websites,
                 )
                 work.put((key, "lead", processed))
         except Exception as exc:  # noqa: BLE001 - report, don't abort other sources
@@ -292,6 +300,7 @@ def run_search(
     settings = settings or get_settings()
     scoring = get_scoring()
     filters = get_filters()
+    segments = get_segments()
     if max_workers is None:
         max_workers = getattr(settings, "max_workers", 1) or 1
 
@@ -318,9 +327,9 @@ def run_search(
         stats.run_id = run.id
 
         if max_workers and max_workers > 1:
-            _run_concurrent(req, scrapers, session, run.id, stats, settings, scoring, filters, max_workers)
+            _run_concurrent(req, scrapers, session, run.id, stats, settings, scoring, filters, segments, max_workers)
         else:
-            _run_sequential(req, scrapers, session, run.id, stats, settings, scoring, filters)
+            _run_sequential(req, scrapers, session, run.id, stats, settings, scoring, filters, segments)
 
         run.found = stats.found
         run.kept = stats.kept

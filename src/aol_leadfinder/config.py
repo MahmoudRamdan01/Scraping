@@ -109,3 +109,11 @@ def get_scoring() -> dict:
 
 def get_filters() -> dict:
     return load_yaml("filters.yaml")
+
+
+def get_segments() -> dict:
+    """Targeting segments config; empty dict if the file is absent (safe default)."""
+    try:
+        return load_yaml("segments.yaml")
+    except FileNotFoundError:
+        return {}
