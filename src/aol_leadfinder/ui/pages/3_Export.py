@@ -12,9 +12,10 @@ for _p in pathlib.Path(__file__).resolve().parents:
 import streamlit as st  # noqa: E402
 
 from aol_leadfinder.export.excel import leads_to_dataframe, write_styled_workbook  # noqa: E402
-from aol_leadfinder.storage.db import read_all_leads  # noqa: E402
+from aol_leadfinder.storage.db import mark_pushed_to_sheet, read_all_leads  # noqa: E402
 from aol_leadfinder.storage.sheets_sync import (  # noqa: E402
     SheetsNotConfigured,
+    append_new_leads,
     is_configured,
     push_dataframe,
 )
@@ -44,19 +45,35 @@ st.download_button(
 )
 
 st.divider()
-st.subheader("🔄 مزامنة Google Sheets (لمتابعة مستر زياد)")
+st.subheader("🔄 مزامنة Google Sheets (Sales_Review)")
 if is_configured():
-    sheet_name = st.text_input("اسم الشيت / Sheet name", "Air Ocean Leads")
-    if st.button("🔄 زامن دلوقتي / Sync now"):
+    st.caption("بيضيف **العملاء الجدد بس** في آخر الشيت — مش بيمسح ولا بيلمس أي صف أو عمود موجود.")
+    if st.button("➕ ضيف الجديد للشيت / Append new leads", type="primary"):
         try:
-            url = push_dataframe(df, sheet_name)
-            st.success(f"تمت المزامنة ✅ {url}")
+            result = append_new_leads(leads)
+            if result.appended:
+                mark_pushed_to_sheet(engine, [lead.id for lead in result.leads])
+            st.success(
+                f"تمت الإضافة ✅ {result.appended} عميل جديد "
+                f"(تخطّينا {result.skipped} موجودين بالفعل) — {result.url}"
+            )
         except SheetsNotConfigured as exc:
             st.error(str(exc))
         except Exception as exc:  # noqa: BLE001
             st.error(f"فشلت المزامنة: {exc}")
+
+    with st.expander("⚙️ متقدم: استبدال الشيت بالكامل (بيمسح الشغل اليدوي!)"):
+        st.warning("⚠️ ده بيمسح الشيت كله ويعيد كتابته — هيضيّع ملاحظات المبيعات اليدوية. استخدمه بحذر شديد.")
+        sheet_name = st.text_input("اسم الشيت / Sheet name", "Air Ocean Leads")
+        if st.button("🔄 استبدال كامل / Overwrite all"):
+            try:
+                url = push_dataframe(df, sheet_name)
+                st.success(f"تم الاستبدال ✅ {url}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"فشل: {exc}")
 else:
     st.warning(
-        "Google Sheets مش متظبط. لتفعيله: اعمل service-account JSON مجاني من Google Cloud، "
-        "حط مساره في `GOOGLE_SHEETS_CRED` داخل ملف `.env`، وشارك الشيت مع إيميل الـ service account."
+        "Google Sheets مش متظبط. لتفعيله: اعمل service-account JSON مجاني من Google Cloud، حط محتواه في "
+        "`GOOGLE_SHEETS_CRED_JSON` (أو مساره في `GOOGLE_SHEETS_CRED`) و`GOOGLE_SHEET_ID`، وشارك الشيت مع "
+        "إيميل الـ service account كـ Editor."
     )

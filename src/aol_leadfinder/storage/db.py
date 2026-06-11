@@ -256,3 +256,22 @@ def update_lead_crm(engine, lead_id: int, **fields) -> bool:
 def update_lead_status(engine, lead_id: int, *, status: Optional[str] = None, notes: Optional[str] = None) -> bool:
     payload = {k: v for k, v in {"status": status, "notes": notes}.items() if v is not None}
     return update_lead_crm(engine, lead_id, **payload)
+
+
+def mark_pushed_to_sheet(engine, lead_ids) -> int:
+    """Flag leads as synced to the Google Sheet so re-runs never re-append them."""
+    ids = [i for i in lead_ids if i is not None]
+    if not ids:
+        return 0
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        n = 0
+        for lead_id in ids:
+            lead = session.get(Lead, lead_id)
+            if lead is not None:
+                lead.pushed_to_sheet = True
+                lead.sheet_synced_at = now
+                session.add(lead)
+                n += 1
+        session.commit()
+        return n
