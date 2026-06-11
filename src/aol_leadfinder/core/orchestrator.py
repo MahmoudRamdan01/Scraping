@@ -6,6 +6,8 @@ other sources continue.
 from __future__ import annotations
 
 import itertools
+import queue
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -146,10 +148,152 @@ def _enrich_website(norm, region: str = "EG") -> None:
         norm.social_links = links
 
 
-def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional[Settings] = None) -> RunStats:
+@dataclass
+class ProcessedLead:
+    """Outcome of the pure (DB-free) per-lead pipeline. The caller does the
+    upsert/stats so this function can run in a worker thread with no DB access."""
+
+    norm: object
+    outcome: str  # "keep" | "drop" | "quarantine"
+    reason: Optional[str] = None
+    created: Optional[bool] = None  # filled by the DB writer for "keep"
+
+
+def _process_raw(raw, *, settings: Settings, scoring: dict, filters: dict, enrich: bool) -> ProcessedLead:
+    """normalize -> classify -> (optional) enrich -> validate -> filter -> score.
+
+    Pure: no database, no shared state. Returns the decision; the single DB writer
+    applies it. The sequential and concurrent paths both call this, so their
+    semantics can never drift.
+    """
+    norm = normalize_lead(raw, default_country=settings.default_country, region=settings.default_region)
+    # Company Intelligence from the listing description (offline, free).
+    # Falls back to the category when there's no description text.
+    if norm.description or norm.category:
+        intel = classify_company(norm.description or "", norm.category)
+        norm.company_type = intel.company_type
+        norm.shipping_intent = intel.shipping_intent
+        if intel.has_online_store:
+            norm.has_online_store = True
+    # Optional deep website crawl (fills phone/email/type/intent).
+    if enrich and norm.website:
+        _enrich_website(norm, settings.default_region)
+    # Structural validation BEFORE quality filters: broken data (no identity /
+    # no contact / bad phone) is quarantined — kept for review, excluded from the
+    # working list — never silently dropped and never allowed to pollute real leads.
+    valid, vreason = validate_lead(norm)
+    if not valid:
+        return ProcessedLead(norm=norm, outcome="quarantine", reason=vreason)
+    ok, reason = passes_filters(norm, filters)
+    if not ok:
+        return ProcessedLead(norm=norm, outcome="drop", reason=reason)
+    score, tier, reasons = score_lead(norm, scoring)
+    norm.score, norm.tier, norm.score_reasons = score, tier, reasons
+    return ProcessedLead(norm=norm, outcome="keep")
+
+
+def _apply_processed(session: Session, processed: ProcessedLead, run_id: Optional[int],
+                     stats: RunStats, ss: SourceStat) -> None:
+    """Persist one processed lead and update counters. Single-writer side."""
+    norm = processed.norm
+    if processed.outcome == "quarantine":
+        upsert_lead(session, norm, run_id, quarantine_reason=processed.reason)
+        stats.quarantine(processed.reason)
+        ss.quarantined += 1
+    elif processed.outcome == "drop":
+        stats.drop(processed.reason)
+        ss.dropped += 1
+    else:  # keep
+        _, created = upsert_lead(session, norm, run_id)
+        stats.kept += 1
+        ss.kept += 1
+        stats.created += int(created)
+        stats.updated += int(not created)
+
+
+def _run_sequential(req, scrapers, session, run_id, stats, settings, scoring, filters) -> None:
+    """The original, deterministic path: one source at a time, commit per source.
+    Used whenever max_workers <= 1 (all unit tests), so its behaviour is unchanged."""
+    for key, scraper in scrapers.items():
+        ss = stats.source(key)
+        try:
+            for raw in itertools.islice(scraper.search(req), req.max_results):
+                stats.found += 1
+                ss.found += 1
+                processed = _process_raw(
+                    raw, settings=settings, scoring=scoring, filters=filters, enrich=req.enrich_websites
+                )
+                _apply_processed(session, processed, run_id, stats, ss)
+            session.commit()
+        except Exception as exc:  # noqa: BLE001 - isolate per-source failures
+            log.exception("source '%s' failed", key)
+            stats.errors[key] = str(exc)
+            ss.error = str(exc)
+            session.rollback()
+
+
+_QUEUE_SENTINEL = object()
+
+
+def _run_concurrent(req, scrapers, session, run_id, stats, settings, scoring, filters, max_workers) -> None:
+    """Producer/consumer: scraper threads do scrape+normalize+enrich (no DB) and
+    push results onto a queue; THIS (main) thread is the sole DB writer, so SQLite
+    never sees concurrent writes. Per-source isolation and counters match the
+    sequential path; only wall-clock time differs."""
+    for key in scrapers:  # stable, pre-created SourceStats
+        stats.source(key)
+
+    work: queue.Queue = queue.Queue()
+
+    def produce(key: str, scraper) -> None:
+        try:
+            for raw in itertools.islice(scraper.search(req), req.max_results):
+                processed = _process_raw(
+                    raw, settings=settings, scoring=scoring, filters=filters, enrich=req.enrich_websites
+                )
+                work.put((key, "lead", processed))
+        except Exception as exc:  # noqa: BLE001 - report, don't abort other sources
+            work.put((key, "error", str(exc)))
+        finally:
+            work.put((key, "done", None))
+
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        for key, scraper in scrapers.items():
+            pool.submit(produce, key, scraper)
+
+        remaining = len(scrapers)
+        while remaining > 0:
+            key, kind, payload = work.get()
+            ss = stats.source(key)
+            if kind == "done":
+                remaining -= 1
+                session.commit()  # persist this source's batch on completion
+            elif kind == "error":
+                log.error("source '%s' failed: %s", key, payload)
+                stats.errors[key] = payload
+                ss.error = payload
+            else:  # "lead"
+                stats.found += 1
+                ss.found += 1
+                _apply_processed(session, payload, run_id, stats, ss)
+    finally:
+        pool.shutdown(wait=True)
+    session.commit()
+
+
+def run_search(
+    req: SearchRequest,
+    source_keys: list[str],
+    *,
+    settings: Optional[Settings] = None,
+    max_workers: Optional[int] = None,
+) -> RunStats:
     settings = settings or get_settings()
     scoring = get_scoring()
     filters = get_filters()
+    if max_workers is None:
+        max_workers = getattr(settings, "max_workers", 1) or 1
 
     engine = get_engine(settings.db_path)
     init_db(engine)
@@ -173,54 +317,10 @@ def run_search(req: SearchRequest, source_keys: list[str], *, settings: Optional
         session.refresh(run)
         stats.run_id = run.id
 
-        for key, scraper in scrapers.items():
-            ss = stats.source(key)
-            try:
-                for raw in itertools.islice(scraper.search(req), req.max_results):
-                    stats.found += 1
-                    ss.found += 1
-                    norm = normalize_lead(
-                        raw, default_country=settings.default_country, region=settings.default_region
-                    )
-                    # Company Intelligence from the listing description (offline, free).
-                    # Falls back to the category when there's no description text.
-                    if norm.description or norm.category:
-                        intel = classify_company(norm.description or "", norm.category)
-                        norm.company_type = intel.company_type
-                        norm.shipping_intent = intel.shipping_intent
-                        if intel.has_online_store:
-                            norm.has_online_store = True
-                    # Optional deep website crawl (fills phone/email/type/intent)
-                    if req.enrich_websites and norm.website:
-                        _enrich_website(norm, settings.default_region)
-                    # Structural validation BEFORE quality filters: broken data
-                    # (no identity / no contact / bad phone) is quarantined — kept
-                    # for review, excluded from the working list — never silently
-                    # dropped and never allowed to pollute real leads.
-                    valid, vreason = validate_lead(norm)
-                    if not valid:
-                        upsert_lead(session, norm, run.id, quarantine_reason=vreason)
-                        stats.quarantine(vreason)
-                        ss.quarantined += 1
-                        continue
-                    ok, reason = passes_filters(norm, filters)
-                    if not ok:
-                        stats.drop(reason)
-                        ss.dropped += 1
-                        continue
-                    score, tier, reasons = score_lead(norm, scoring)
-                    norm.score, norm.tier, norm.score_reasons = score, tier, reasons
-                    _, created = upsert_lead(session, norm, run.id)
-                    stats.kept += 1
-                    ss.kept += 1
-                    stats.created += int(created)
-                    stats.updated += int(not created)
-                session.commit()
-            except Exception as exc:  # noqa: BLE001 - isolate per-source failures
-                log.exception("source '%s' failed", key)
-                stats.errors[key] = str(exc)
-                ss.error = str(exc)
-                session.rollback()
+        if max_workers and max_workers > 1:
+            _run_concurrent(req, scrapers, session, run.id, stats, settings, scoring, filters, max_workers)
+        else:
+            _run_sequential(req, scrapers, session, run.id, stats, settings, scoring, filters)
 
         run.found = stats.found
         run.kept = stats.kept
