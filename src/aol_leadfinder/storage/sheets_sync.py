@@ -22,7 +22,7 @@ import pandas as pd
 
 from ..config import get_settings
 from ..logging_setup import get_logger
-from ..pipeline.normalize import normalize_domain
+from ..pipeline.normalize import normalize_domain, normalize_phone
 
 log = get_logger("sheets")
 
@@ -117,8 +117,9 @@ _VALUE_BY_HEADER = {
 }
 
 
-def _lead_keys(lead: Any) -> tuple[Optional[str], Optional[str]]:
-    return getattr(lead, "phone_e164", None), getattr(lead, "domain", None)
+def _lead_keys(lead: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    email = (getattr(lead, "email", None) or "").strip().lower() or None
+    return getattr(lead, "phone_e164", None), getattr(lead, "domain", None), email
 
 
 def _map_row(lead: Any, header: list[str], today: str) -> list[str]:
@@ -146,8 +147,12 @@ def _rows_to_append(leads, existing_keys: set, header: list[str], today: str):
         if getattr(lead, "pushed_to_sheet", False):
             skipped += 1
             continue
-        phone, domain = _lead_keys(lead)
-        if (phone and phone in existing_keys) or (domain and domain in existing_keys):
+        phone, domain, email = _lead_keys(lead)
+        if (
+            (phone and phone in existing_keys)
+            or (domain and domain in existing_keys)
+            or (email and email in existing_keys)
+        ):
             skipped += 1
             continue
         rows.append(_map_row(lead, header, today))
@@ -156,18 +161,36 @@ def _rows_to_append(leads, existing_keys: set, header: list[str], today: str):
 
 
 def _existing_keys(worksheet, header: list[str]) -> set:
+    """Phone (E.164-normalised) + domain keys already present in a worksheet.
+
+    Phones are run through ``normalize_phone`` so a key matches regardless of how
+    the sheet stored it (with/without ``+``, spaces, etc.)."""
     keys: set = set()
     if "Phone" in header:
         for v in worksheet.col_values(header.index("Phone") + 1)[1:]:
-            v = (v or "").strip()
-            if v:
-                keys.add(v)
+            e = normalize_phone(v, "EG")
+            if e:
+                keys.add(e)
     if "Website" in header:
         for v in worksheet.col_values(header.index("Website") + 1)[1:]:
             d = normalize_domain(v)
             if d:
                 keys.add(d)
+    if "Email" in header:
+        for v in worksheet.col_values(header.index("Email") + 1)[1:]:
+            e = (v or "").strip().lower()
+            if e and "@" in e:
+                keys.add(e)
     return keys
+
+
+def _resolve_dedup_tabs(extra_dedup_tabs) -> list[str]:
+    """Extra tab names to de-dup against (e.g. a master 'Leads' tab) so a lead the
+    team already has is never re-surfaced. From the arg or GOOGLE_SHEET_DEDUP_TABS."""
+    if extra_dedup_tabs is not None:
+        return list(extra_dedup_tabs)
+    raw = os.environ.get("GOOGLE_SHEET_DEDUP_TABS", "")
+    return [t.strip() for t in raw.split(",") if t.strip()]
 
 
 def _ensure_new_columns(worksheet, header: list[str]):
@@ -183,8 +206,14 @@ def _ensure_new_columns(worksheet, header: list[str]):
     return header + missing
 
 
-def append_new_leads(leads, *, sheet_id: Optional[str] = None, tab: Optional[str] = None) -> AppendResult:
-    """Append only NEW leads to the sheet (append-only; existing rows untouched)."""
+def append_new_leads(
+    leads, *, sheet_id: Optional[str] = None, tab: Optional[str] = None, extra_dedup_tabs=None
+) -> AppendResult:
+    """Append only NEW leads to the sheet (append-only; existing rows untouched).
+
+    ``extra_dedup_tabs`` (or GOOGLE_SHEET_DEDUP_TABS) lists other tabs — e.g. a
+    master 'Leads' tab — whose phone/domain keys also count as "already have it",
+    so the team never sees a duplicate of a lead they're already working."""
     import gspread
 
     creds = _load_credentials()
@@ -209,6 +238,13 @@ def append_new_leads(leads, *, sheet_id: Optional[str] = None, tab: Optional[str
         header = _ensure_new_columns(worksheet, header)
 
     existing = _existing_keys(worksheet, header)
+    for extra in _resolve_dedup_tabs(extra_dedup_tabs):
+        if extra and extra != tab:
+            try:
+                ews = spreadsheet.worksheet(extra)
+                existing |= _existing_keys(ews, ews.row_values(1))
+            except gspread.WorksheetNotFound:
+                log.warning("dedup tab %r not found — skipping", extra)
     rows, appended, skipped = _rows_to_append(leads, existing, header, date.today().isoformat())
     if rows:
         worksheet.append_rows(rows, value_input_option="USER_ENTERED")

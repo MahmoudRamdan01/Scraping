@@ -55,6 +55,10 @@ jobs:
         env:
           GOOGLE_SHEETS_CRED_JSON: ${{ secrets.GOOGLE_SHEETS_CRED_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          # New leads go to the Sales_Review tab, de-duped against the master "Leads"
+          # tab so a company the team already works is never re-surfaced.
+          GOOGLE_SHEET_TAB: "Sales_Review"
+          GOOGLE_SHEET_DEDUP_TABS: "Leads"
           AOL_MAX_WORKERS: "6"
           AOL_HTTP_POOL: "1"
           AOL_HTTP_CACHE_DIR: ".http_cache"

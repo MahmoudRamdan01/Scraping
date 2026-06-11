@@ -70,6 +70,18 @@ def test_rows_to_append_skips_existing_and_pushed():
     assert skipped == 3
 
 
+def test_rows_to_append_dedups_by_email():
+    # An email-only lead (no phone/website) must still be de-duped by its email.
+    existing = {"info@known.example"}
+    leads = [
+        _lead(company_name="EmailDup", email="info@known.example"),
+        _lead(company_name="FreshEmail", email="new@fresh.example"),
+    ]
+    rows, appended, skipped = _rows_to_append(leads, existing, HEADER, "2026-06-11")
+    assert [a.company_name for a in appended] == ["FreshEmail"]
+    assert skipped == 1
+
+
 def test_rows_to_append_empty_when_all_known():
     existing = {"+201002223334"}
     leads = [_lead(phone_e164="+201002223334", domain="x.example")]
