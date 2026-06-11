@@ -36,3 +36,31 @@ def test_analyze_website_html():
     intel = analyze_website_html(html)
     assert intel.company_type in {"Importer", "Distributor"}
     assert intel.shipping_intent > 0
+
+
+def test_factory_that_ships_is_not_a_forwarder():
+    # The old classifier filed this as "Freight Forwarder" because of "شحن"/"shipping";
+    # a product company that merely ships is a CUSTOMER, not a competitor.
+    intel = classify_company(
+        "مصنع تصنيع عطور ومستحضرات تجميل — نوفر شحن لكل المحافظات. fast shipping available"
+    )
+    assert intel.company_type == "Manufacturer"
+    assert intel.is_competitor is False
+
+
+def test_real_forwarder_is_competitor():
+    intel = classify_company(
+        "We are a freight forwarder offering customs clearance and bill of lading services"
+    )
+    assert intel.company_type == "Freight Forwarder"
+    assert intel.is_competitor is True
+
+
+def test_category_forwarder_fallback_is_competitor():
+    intel = classify_company("welcome to our website", category="Freight Forwarder")
+    assert intel.company_type == "Freight Forwarder"
+    assert intel.is_competitor is True
+
+
+def test_customer_type_is_not_competitor():
+    assert classify_company("We export garments to Europe").is_competitor is False

@@ -34,5 +34,17 @@ categories:
     keywords: ["تاجر جملة", "جملة", "wholesale", "wholesaler"]
   - name: Distributors
     keywords: ["موزع", "توزيع", "distributor", "distribution"]
+  - name: Plastics
+    keywords: ["بلاستيك", "صناعات بلاستيكية", "plastic", "plastic industries"]
+  - name: Textiles
+    keywords: ["نسيج", "غزل ونسيج", "textile", "textiles"]
+  - name: Chemicals
+    keywords: ["كيماويات", "صناعات كيماوية", "chemical", "chemical industries"]
+  - name: Packaging
+    keywords: ["تعبئة وتغليف", "تغليف", "packaging", "carton"]
+  - name: Garments
+    keywords: ["ملابس جاهزة", "مصنع ملابس", "garments", "clothing factory"]
+  - name: Engineering Industries
+    keywords: ["صناعات هندسية", "منتجات معدنية", "engineering industries", "metal products"]
   - name: Freight Forwarder
     keywords: ["شحن دولي", "تخليص جمركي", "freight forwarder", "logistics", "customs clearance"]

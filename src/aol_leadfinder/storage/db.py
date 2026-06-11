@@ -5,18 +5,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..pipeline.dedup import match_keys
 from ..pipeline.normalize import NormalizedLead
-from .models import Lead, Run
+from .models import QUARANTINE_STATUS, Lead, Run
 
 # Fields merged from a new sighting into an existing lead (fill blanks only).
 _MERGE_FIELDS = (
     "phone_e164", "phone_raw", "email", "website", "domain", "address", "city",
     "governorate", "country", "category", "description", "source", "source_url",
     "followers", "last_activity_date", "rating", "branches", "has_online_store",
+    "facebook", "linkedin", "store_platform",
+    "contact_name", "contact_role", "contact_email",
 )
 _EMPTY = (None, "", [])
 
@@ -31,28 +33,68 @@ _MIGRATION_COLUMNS = {
     "description": "TEXT",
     "target_markets": "JSON",
     "enriched": "INTEGER",
+    "sources_seen": "TEXT",
+    "quarantine_reason": "TEXT",
+    # v2 — richer lead data + autopilot sheet-sync tracking.
+    "facebook": "TEXT",
+    "linkedin": "TEXT",
+    "store_platform": "TEXT",
+    "product_type": "TEXT",
+    "segment": "TEXT",
+    "contact_name": "TEXT",
+    "contact_role": "TEXT",
+    "contact_email": "TEXT",
+    "pushed_to_sheet": "INTEGER",
+    "sheet_synced_at": "TEXT",
 }
+
+# Columns added to the run table after v1 (Sprint A per-source observability).
+_RUN_MIGRATION_COLUMNS = {
+    "source_stats": "JSON",
+}
+
+
+def _merge_sources_seen(existing_seen: Optional[str], new_source: Optional[str]) -> Optional[str]:
+    """Append-only union of source keys, comma-joined and sorted (stable, dedup'd)."""
+    seen = {s for s in (existing_seen or "").split(",") if s}
+    if new_source:
+        seen.add(new_source)
+    return ",".join(sorted(seen)) or None
 
 # CRM fields editable from the UI.
 _CRM_FIELDS = {"status", "notes", "assigned_to", "last_contact_date", "next_followup_date"}
 
 
 def get_engine(db_path: Path | str):
-    return create_engine(f"sqlite:///{db_path}", echo=False)
+    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _record):
+        # WAL lets the Streamlit UI keep reading while a search run writes
+        # (default rollback journal locks them against each other); busy_timeout
+        # makes a contended connection wait instead of erroring "database is locked".
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
+
+    return engine
 
 
 def _ensure_columns(engine) -> None:
-    """Idempotent migration: add CRM/score columns to an existing leads table."""
+    """Idempotent migration: add new columns to existing lead/run tables."""
     insp = inspect(engine)
-    if "lead" not in insp.get_table_names():
-        return
-    existing = {col["name"] for col in insp.get_columns("lead")}
-    missing = {c: t for c, t in _MIGRATION_COLUMNS.items() if c not in existing}
-    if not missing:
-        return
-    with engine.begin() as conn:
-        for col, coltype in missing.items():
-            conn.execute(text(f"ALTER TABLE lead ADD COLUMN {col} {coltype}"))
+    names = set(insp.get_table_names())
+    for table, columns in (("lead", _MIGRATION_COLUMNS), ("run", _RUN_MIGRATION_COLUMNS)):
+        if table not in names:
+            continue
+        existing = {col["name"] for col in insp.get_columns(table)}
+        missing = {c: t for c, t in columns.items() if c not in existing}
+        if not missing:
+            continue
+        with engine.begin() as conn:
+            for col, coltype in missing.items():
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
 
 
 def init_db(engine) -> None:
@@ -77,14 +119,28 @@ def _find_existing(session: Session, n: NormalizedLead) -> Optional[Lead]:
     return None
 
 
-def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = None) -> tuple[Lead, bool]:
-    """Insert a new lead or merge into an existing one. Returns (lead, created)."""
+def upsert_lead(
+    session: Session,
+    n: NormalizedLead,
+    run_id: Optional[int] = None,
+    *,
+    quarantine_reason: Optional[str] = None,
+) -> tuple[Lead, bool]:
+    """Insert a new lead or merge into an existing one. Returns (lead, created).
+
+    ``quarantine_reason`` (set when the record failed structural validation) only
+    takes effect on INSERT: a brand-new broken record is stored as quarantined.
+    On MERGE it is intentionally ignored so a broken sighting can never downgrade
+    an existing good lead — it merely contributes provenance/blank fields.
+    """
     existing = _find_existing(session, n)
     if existing is not None:
         for fld in _MERGE_FIELDS:
             new_val = getattr(n, fld, None)
             if getattr(existing, fld, None) in _EMPTY and new_val not in _EMPTY:
                 setattr(existing, fld, new_val)
+        # `source` (above) stays the first-seen primary; `sources_seen` accumulates all.
+        existing.sources_seen = _merge_sources_seen(existing.sources_seen, n.source)
         extras = set(existing.extra_phones or []) | set(n.extra_phones or [])
         extras.discard(existing.phone_e164)
         existing.extra_phones = sorted(extras) or None
@@ -97,6 +153,10 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         existing.score_reasons = n.score_reasons or None
         if n.company_type:
             existing.company_type = n.company_type
+        if n.product_type:
+            existing.product_type = n.product_type
+        if n.segment:
+            existing.segment = n.segment
         if n.shipping_intent is not None:
             existing.shipping_intent = n.shipping_intent
         if n.target_markets:
@@ -124,29 +184,58 @@ def upsert_lead(session: Session, n: NormalizedLead, run_id: Optional[int] = Non
         description=n.description,
         source=n.source,
         source_url=n.source_url,
+        sources_seen=_merge_sources_seen(None, n.source),
         social_links=(n.social_links or None),
+        facebook=n.facebook,
+        linkedin=n.linkedin,
         followers=n.followers,
         last_activity_date=n.last_activity_date,
         rating=n.rating,
         branches=n.branches,
         has_online_store=n.has_online_store,
+        store_platform=n.store_platform,
         company_type=n.company_type,
+        product_type=n.product_type,
+        segment=n.segment,
         shipping_intent=n.shipping_intent,
         target_markets=(n.target_markets or None),
         enriched=n.enriched,
+        contact_name=n.contact_name,
+        contact_role=n.contact_role,
+        contact_email=n.contact_email,
         score=n.score,
         tier=n.tier,
         score_reasons=(n.score_reasons or None),
-        status="new",
+        status=QUARANTINE_STATUS if quarantine_reason else "new",
+        quarantine_reason=quarantine_reason,
         run_id=run_id,
     )
     session.add(lead)
     return lead, True
 
 
-def read_all_leads(engine) -> list[Lead]:
+def read_all_leads(engine, *, include_quarantined: bool = False) -> list[Lead]:
+    """Working lead list (highest score first). Quarantined records are excluded
+    by default; pass ``include_quarantined=True`` to see everything."""
     with Session(engine) as session:
-        return list(session.exec(select(Lead).order_by(Lead.score.desc())).all())
+        stmt = select(Lead)
+        if not include_quarantined:
+            stmt = stmt.where(Lead.status != QUARANTINE_STATUS)
+        return list(session.exec(stmt.order_by(Lead.score.desc())).all())
+
+
+def read_runs(engine, *, limit: int = 100) -> list[Run]:
+    """Recent runs, newest first — feeds the Dashboard source-health panel."""
+    with Session(engine) as session:
+        stmt = select(Run).order_by(Run.started_at.desc()).limit(limit)
+        return list(session.exec(stmt).all())
+
+
+def read_quarantined(engine) -> list[Lead]:
+    """Structurally-invalid records held for review (most recent first)."""
+    with Session(engine) as session:
+        stmt = select(Lead).where(Lead.status == QUARANTINE_STATUS).order_by(Lead.updated_at.desc())
+        return list(session.exec(stmt).all())
 
 
 def update_lead_crm(engine, lead_id: int, **fields) -> bool:
@@ -167,3 +256,22 @@ def update_lead_crm(engine, lead_id: int, **fields) -> bool:
 def update_lead_status(engine, lead_id: int, *, status: Optional[str] = None, notes: Optional[str] = None) -> bool:
     payload = {k: v for k, v in {"status": status, "notes": notes}.items() if v is not None}
     return update_lead_crm(engine, lead_id, **payload)
+
+
+def mark_pushed_to_sheet(engine, lead_ids) -> int:
+    """Flag leads as synced to the Google Sheet so re-runs never re-append them."""
+    ids = [i for i in lead_ids if i is not None]
+    if not ids:
+        return 0
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        n = 0
+        for lead_id in ids:
+            lead = session.get(Lead, lead_id)
+            if lead is not None:
+                lead.pushed_to_sheet = True
+                lead.sheet_synced_at = now
+                session.add(lead)
+                n += 1
+        session.commit()
+        return n

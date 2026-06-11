@@ -1,0 +1,81 @@
+# Targeting segments (pipeline/segment.py). Coarse priority buckets used for
+# reporting and the service floor. Edit freely — no code change needed.
+#
+# P1 = physical-product makers/traders · P2 = e-commerce · P3 = exporters/councils
+# service = floored (not targeted) · competitor = freight forwarders (never a lead)
+
+# What to do with service businesses: "floor" keeps them at a low score (visible
+# but ignorable), "drop" removes them entirely. We floor by default so nothing is
+# silently lost and the sheet still shows them as low-tier.
+service_action: floor
+service_floor: 20
+
+# Businesses that do NOT ship physical goods — not our customers.
+service_keywords:
+  - marketing
+  - advertising
+  - digital agency
+  - تسويق
+  - دعاية
+  - اعلان
+  - accounting
+  - محاسبة
+  - software
+  - برمجة
+  - it solutions
+  - information technology
+  - تكنولوجيا المعلومات
+  - consulting
+  - consultancy
+  - استشارات
+  - clinic
+  - عيادة
+  - medical center
+  - hospital
+  - law firm
+  - محاماة
+  - محامي
+  - human resources
+  - recruitment
+  - موارد بشرية
+  - توظيف
+  - training
+  - تدريب
+  - travel agency
+  - سياحة
+  - real estate
+  - عقارات
+
+# Priority 1 — physical-product categories (must match category names in categories.yaml).
+p1_categories:
+  - Cosmetics
+  - Perfumes
+  - Pharmaceuticals
+  - Home Appliances
+  - Clothing
+  - Fashion Brands
+  - Furniture
+  - Electronics
+  - Food Suppliers
+  - Medical Supplies
+  - Factories
+  - Plastics
+  - Textiles
+  - Chemicals
+  - Packaging
+  - Garments
+  - Engineering Industries
+  - Wholesalers
+  - Distributors
+
+# Priority 2 — e-commerce.
+p2_categories:
+  - Gift Shops
+
+# Priority 3 — exporters / councils.
+p3_categories:
+  - Import & Export
+p3_sources:
+  - textile_council
+  - aece
+  - goeic

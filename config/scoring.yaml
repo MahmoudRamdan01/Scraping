@@ -1,36 +1,38 @@
-# Transparent, tunable lead scoring. Sales manager can edit these weights
-# without touching code. Score is clamped to max_score, then mapped to a tier.
+# Lead scoring — business-fit FIRST (sales team's 100/70/50/20 rule), then
+# reachability bonuses. The sales manager can retune every number here without
+# touching code. Presence of `base_bands` switches on the band engine.
+#
+#   ~100  factory / product-maker WITH selling website + online store + ships
+#   ~70   importer or distributor (trader)
+#   ~50   general trading company
+#    20   service company (floored — not targeted)
+#    10   freight forwarder (competitor — never a real lead)
 
 max_score: 100
-max_intent_points: 20   # how many points a high Shipping-Intent (0-100) can add
 
-tiers:        # minimum score for each tier
-  Hot: 61
-  Medium: 31
-  Weak: 0
+# Base score by business fit. Bonuses below push a lead UP toward max_score.
+base_bands:
+  product_maker: 62     # Manufacturer / Exporter
+  trader: 52            # Importer / Distributor
+  ecommerce: 60         # online stores ship constantly
+  general_trading: 38   # generic Import & Export
+  service: 20           # floored, flat
+  competitor: 10        # freight forwarders, flat
+  default: 32
 
-# Simple presence-based points
-weights:
+# Reachability / qualification bonuses (added to the base, then clamped).
+bonuses:
   has_website: 10
-  has_phone: 8
+  has_online_store: 12
+  ships: 8              # exports/non-local markets OR strong shipping intent
+  has_phone: 6
   has_email: 5
-  has_linkedin: 5
-  multiple_branches: 8
-  has_online_store: 10
-  in_freight_directory: 10   # high buying-intent for a shipping company
+  has_contact_person: 6 # a named export/logistics/owner contact
+  has_linkedin: 4
 
-# Points by recency of last known activity (first matching bucket wins)
-activity:
-  - {max_months: 3, points: 15}
-  - {max_months: 12, points: 8}
-  - {max_months: 24, points: 3}
-
-# Points by follower count (first matching bucket wins; only when data exists)
-followers:
-  - {min: 1000, points: 15}
-  - {min: 500, points: 8}
-  - {min: 100, points: 3}
-  - {min: 0, points: 0}
-
-# Sources/categories treated as high-intent freight signals
-freight_sources: [freightclub, wsdconnect, forwarding_companies]
+# Minimum score for each tier (retuned so real leads separate instead of all
+# clustering in one band).
+tiers:
+  Hot: 65
+  Medium: 40
+  Weak: 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import pathlib
 import sys
 
@@ -14,6 +15,13 @@ from aol_leadfinder.config import get_categories  # noqa: E402
 from aol_leadfinder.core.orchestrator import run_search  # noqa: E402
 from aol_leadfinder.scrapers import registry  # noqa: E402
 from aol_leadfinder.scrapers.base import SearchRequest  # noqa: E402
+from aol_leadfinder.storage.db import mark_pushed_to_sheet, read_all_leads  # noqa: E402
+from aol_leadfinder.storage.sheets_sync import (  # noqa: E402
+    SheetsNotConfigured,
+    append_new_leads,
+    is_configured,
+)
+from aol_leadfinder.ui.common import get_ready_engine  # noqa: E402
 
 st.set_page_config(page_title="Search — Air Ocean Lead Finder", page_icon="🔍", layout="wide")
 st.title("🔍 بحث / Search")
@@ -28,13 +36,30 @@ category_names = [c["name"] for c in categories]
 
 # Business role — turns a category into an End-Customer query
 # (e.g. Cosmetics + Manufacturer -> "Cosmetics manufacturers in Cairo").
-ROLES = ["Manufacturer", "Factory", "Importer", "Exporter", "Distributor", "Wholesaler", "Supplier", "(أي)"]
+ROLES = ["Manufacturer", "Factory", "Importer", "Exporter", "Distributor", "Wholesaler", "Supplier"]
 
+# Option lists for the multi-selects. Egypt-focused: the 27 governorates plus the
+# key industrial cities where manufacturers cluster (the B1 location filter
+# matches a lead's city OR governorate, so either works).
+COUNTRIES = ["Egypt", "Saudi Arabia", "United Arab Emirates", "Kuwait", "Qatar", "Jordan", "Libya", "Sudan"]
+GOVERNORATES = [
+    "Cairo", "Giza", "Alexandria", "Qalyubia", "Dakahlia", "Sharqia", "Gharbia",
+    "Monufia", "Beheira", "Kafr El Sheikh", "Damietta", "Port Said", "Ismailia",
+    "Suez", "Faiyum", "Beni Suef", "Minya", "Asyut", "Sohag", "Qena", "Luxor",
+    "Aswan", "Red Sea", "Matrouh", "North Sinai", "South Sinai", "New Valley",
+    "6th of October", "10th of Ramadan", "Sadat City", "Borg El Arab",
+]
+MAX_COMBINATIONS = 120  # guard against an accidental cartesian explosion
+
+st.caption(
+    "اختار **أكتر من واحد** في أي خانة — هنبحث كل التوليفات / "
+    "pick multiple in any field — every combination is searched."
+)
 col1, col2, col3, col4 = st.columns(4)
-country = col1.text_input("Country / الدولة", "Egypt")
-city = col2.text_input("City / المدينة / المحافظة", "Cairo")
-category = col3.selectbox("Category / المجال", category_names)
-role = col4.selectbox("Business Role / نوع النشاط", ROLES, index=0)
+countries = col1.multiselect("Country / الدولة", COUNTRIES, default=["Egypt"])
+cities = col2.multiselect("City / المدينة / المحافظة", GOVERNORATES, default=["Cairo"])
+selected_categories = col3.multiselect("Category / المجال", category_names, default=category_names[:1])
+roles = col4.multiselect("Business Role / نوع النشاط", ROLES, default=["Manufacturer"])
 max_results = st.slider("أقصى عدد نتائج لكل مصدر / Max results per source", 10, 500, 100, 10)
 st.caption(
     "💡 لاستهداف **العملاء النهائيين**: استخدم Google Maps مع Category + Role "
@@ -43,6 +68,11 @@ st.caption(
 enrich = st.checkbox(
     "🔎 حلّل مواقع الشركات (Company Intelligence) — أبطأ، بيقيّم نوع الشركة ونية الشحن",
     value=False,
+)
+auto_sheet = st.checkbox(
+    "📤 ابعت الـ leads الجديدة لجوجل شيت تلقائيًا بعد البحث",
+    value=is_configured(),
+    help="بيضيف الجديد بس في تاب Sales_Review (deduped ضد الماستر). محتاج GOOGLE_SHEET_ID + المفتاح في .env",
 )
 
 sources = registry.available_sources()
@@ -63,21 +93,71 @@ if st.button("🚀 ابدأ البحث / Run", type="primary"):
     if not selected:
         st.error("اختار مصدر واحد على الأقل.")
         st.stop()
-    keywords = next((c.get("keywords", []) for c in categories if c["name"] == category), [])
-    req = SearchRequest(
-        country=country, city=city, category=category,
-        role=(None if role == "(أي)" else role),
-        keywords=keywords, max_results=max_results, enrich_websites=enrich,
-    )
+
+    # Cartesian product of every multi-selected field — an empty field means "no
+    # filter" (one run with that value as None). Each combination is a SearchRequest.
+    combo_countries = countries or ["Egypt"]
+    combo_cities = cities or [None]
+    combo_categories = selected_categories or [None]
+    combo_roles = roles or [None]
+    combos = list(itertools.product(combo_countries, combo_cities, combo_categories, combo_roles))
+
+    if len(combos) > MAX_COMBINATIONS:
+        st.error(
+            f"التوليفات كتير أوي ({len(combos)}). قلّل الاختيارات (الحد {MAX_COMBINATIONS}). / "
+            f"Too many combinations ({len(combos)}) — narrow your selection."
+        )
+        st.stop()
+
+    st.caption(f"🔁 {len(combos)} توليفة × {len(selected)} مصدر / {len(combos)} combination(s) × {len(selected)} source(s)")
+    agg = {"found": 0, "kept": 0, "created": 0, "updated": 0, "dropped": 0}
+    drop_reasons: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    progress = st.progress(0.0)
     with st.spinner("بنجمع الداتا ونفلترها ونقيّمها..."):
-        stats = run_search(req, selected)
+        for i, (country, city, category, role) in enumerate(combos, start=1):
+            keywords = next((c.get("keywords", []) for c in categories if c["name"] == category), [])
+            req = SearchRequest(
+                country=country, city=city, category=category, role=role,
+                keywords=keywords, max_results=max_results, enrich_websites=enrich,
+            )
+            stats = run_search(req, selected)
+            for key in agg:
+                agg[key] += getattr(stats, key)
+            for reason, count in stats.drop_reasons.items():
+                drop_reasons[reason] = drop_reasons.get(reason, 0) + count
+            errors.update(stats.errors)
+            progress.progress(i / len(combos))
 
     st.success(
-        f"تم ✅  لقينا {stats.found} | احتفظنا بـ {stats.kept} "
-        f"(جديد {stats.created}, محدّث {stats.updated}) | استبعدنا {stats.dropped}"
+        f"تم ✅  {len(combos)} توليفة | لقينا {agg['found']} | احتفظنا بـ {agg['kept']} "
+        f"(جديد {agg['created']}, محدّث {agg['updated']}) | استبعدنا {agg['dropped']}"
     )
-    if stats.drop_reasons:
-        st.write("**أسباب الاستبعاد:**", stats.drop_reasons)
-    if stats.errors:
-        st.error(f"مصادر فشلت: {stats.errors}")
+    if drop_reasons:
+        st.write("**أسباب الاستبعاد:**", drop_reasons)
+    if errors:
+        st.error(f"مصادر فشلت: {errors}")
+
+    # Auto-push the new leads straight to Google Sheets (append-only, deduped).
+    if auto_sheet:
+        if is_configured():
+            with st.spinner("بنبعت الجديد لجوجل شيت..."):
+                try:
+                    engine = get_ready_engine()
+                    res = append_new_leads(read_all_leads(engine))
+                    if res.appended:
+                        mark_pushed_to_sheet(engine, [lead.id for lead in res.leads])
+                    st.success(
+                        f"📤 اتبعت للشيت ✅ {res.appended} جديد (تخطّينا {res.skipped} موجودين) — {res.url}"
+                    )
+                except SheetsNotConfigured as exc:
+                    st.warning(f"الشيت مش متظبط: {exc}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"فشل إرسال الشيت: {exc}")
+        else:
+            st.warning(
+                "📤 الشيت مش متظبط — حط `GOOGLE_SHEET_ID` والمفتاح (`GOOGLE_SHEETS_CRED` أو "
+                "`GOOGLE_SHEETS_CRED_JSON`) و`GOOGLE_SHEET_DEDUP_TABS=Leads` في ملف `.env`."
+            )
+
     st.info("افتح صفحة **📋 Leads** من القائمة الجانبية لرؤية النتائج وتحديث الحالات.")

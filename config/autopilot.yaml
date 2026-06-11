@@ -1,0 +1,53 @@
+# Autopilot plan — the unattended daily run (GitHub Actions).
+#
+# Each day covers a ROTATING slice of the (category × role × governorate) matrix so
+# the whole space is swept over a couple of weeks while each run stays inside the
+# free CI time budget. Export councils are swept once per run (they list all members).
+# Tune any number here — no code change needed.
+
+country: Egypt
+enrich: true                 # website enrichment ON (drives the 100/70/50/20 scoring)
+max_results_per_source: 30   # cap per source, per segment
+daily_segment_limit: 12      # how many directory segments to run per day (rotated)
+
+# Robust, requests-based sources carry the autopilot. Google Maps (Playwright) is
+# included but often blocked from data-center IPs — it degrades gracefully (empty,
+# never crashes); drop it here if CI runs are slow/blocked.
+directory_sources: [yellowpages_eg, google_maps]
+council_sources: [textile_council, aece]   # Priority 3 — swept once per run
+
+roles: [Manufacturer, Factory, Importer, Distributor, Exporter]
+
+governorates:
+  - Cairo
+  - Giza
+  - Alexandria
+  - Qalyubia
+  - Sharqia
+  - Gharbia
+  - Dakahlia
+  - 10th of Ramadan
+  - 6th of October
+  - Port Said
+
+# Priority 1 — physical-product categories.
+categories:
+  - Cosmetics
+  - Perfumes
+  - Pharmaceuticals
+  - Home Appliances
+  - Clothing
+  - Furniture
+  - Electronics
+  - Food Suppliers
+  - Medical Supplies
+  - Plastics
+  - Textiles
+  - Packaging
+  - Garments
+  - Chemicals
+  - Engineering Industries
+
+# Priority 2 — e-commerce (searched without a role).
+ecommerce_categories:
+  - Gift Shops

@@ -32,6 +32,11 @@ STATUS_LABELS_AR = {
 # Statuses that count as "engaged" when computing conversion rate.
 ENGAGED_STATUSES = ["contacted", "interested", "quotation_sent", "negotiation", "won"]
 
+# Sentinel status for structurally-invalid records: kept for review but excluded
+# from the working lead list and conversion math. Intentionally NOT part of
+# LEAD_STATUSES (the sales pipeline) so it never pollutes funnel metrics.
+QUARANTINE_STATUS = "quarantined"
+
 
 class Lead(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -54,20 +59,31 @@ class Lead(SQLModel, table=True):
     category: Optional[str] = None
     description: Optional[str] = None
 
-    source: Optional[str] = None
+    source: Optional[str] = None  # primary (first-seen) source
     source_url: Optional[str] = None
+    sources_seen: Optional[str] = None  # comma-joined union of every source that contributed
     social_links: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    facebook: Optional[str] = None
+    linkedin: Optional[str] = None
 
     followers: Optional[int] = None
     last_activity_date: Optional[date] = None
     rating: Optional[float] = None
     branches: Optional[int] = None
     has_online_store: Optional[bool] = None
+    store_platform: Optional[str] = None  # Shopify / WooCommerce / Salla / Zid
 
     company_type: Optional[str] = None
+    product_type: Optional[str] = None
+    segment: Optional[str] = None  # P1 / P2 / P3 / service / competitor / other
     shipping_intent: Optional[int] = None
     target_markets: Optional[list] = Field(default=None, sa_column=Column(JSON))
     enriched: bool = False
+
+    # Best-effort decision-maker contact (export > logistics > owner/CEO).
+    contact_name: Optional[str] = None
+    contact_role: Optional[str] = None
+    contact_email: Optional[str] = None
 
     score: int = 0
     tier: str = "Weak"
@@ -75,10 +91,15 @@ class Lead(SQLModel, table=True):
 
     # ---- CRM fields ----
     status: str = "new"
+    quarantine_reason: Optional[str] = None  # set only when status == QUARANTINE_STATUS
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     last_contact_date: Optional[date] = None
     next_followup_date: Optional[date] = None
+
+    # Google Sheet append-only sync tracking (owned by sheets_sync, not the merge).
+    pushed_to_sheet: bool = False
+    sheet_synced_at: Optional[datetime] = None
 
     run_id: Optional[int] = Field(default=None, foreign_key="run.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -97,3 +118,7 @@ class Run(SQLModel, table=True):
     updated: int = 0
     status: str = "running"
     error: Optional[str] = None
+    # Per-source observability breakdown (Sprint A). Shape:
+    # {source_key: {found, kept, dropped, quarantined, errors, error, health}}.
+    # Stored as JSON so adding it stays a purely additive schema change.
+    source_stats: Optional[dict] = Field(default=None, sa_column=Column(JSON))

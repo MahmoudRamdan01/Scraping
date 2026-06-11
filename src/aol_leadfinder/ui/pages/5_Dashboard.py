@@ -12,7 +12,7 @@ for _p in pathlib.Path(__file__).resolve().parents:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from aol_leadfinder.storage.db import read_all_leads  # noqa: E402
+from aol_leadfinder.storage.db import read_all_leads, read_quarantined, read_runs  # noqa: E402
 from aol_leadfinder.storage.models import ENGAGED_STATUSES, STATUS_LABELS_AR  # noqa: E402
 from aol_leadfinder.ui.common import get_ready_engine  # noqa: E402
 
@@ -61,6 +61,58 @@ c5.metric("Conversion", f"{conversion:.0f}%")
 
 if due:
     st.warning(f"⏰ عندك {due} متابعة مستحقّة النهاردة أو متأخرة — شوف صفحة Leads (فلتر 'متابعات مستحقّة').")
+
+_quarantined = len(read_quarantined(engine))
+if _quarantined:
+    st.caption(f"🚧 {_quarantined} سجل في المراجعة (Quarantine) — مستبعد من الأرقام دي. شوفهم في صفحة Leads.")
+
+# ---- Source Health (Sprint A observability) ----
+st.divider()
+st.subheader("صحة المصادر / Source Health")
+st.caption("آخر 100 تشغيل — Yield = عدد العملاء المقبولين من كل مصدر / kept per source over the last 100 runs")
+
+_HEALTH_BADGE = {"ok": "🟢 ok", "empty": "🟡 empty", "blocked": "🔴 blocked", "error": "🔴 error"}
+_src_rows: dict[str, dict] = {}
+for _run in read_runs(engine, limit=100):  # newest first
+    _when = _run.finished_at or _run.started_at
+    for _key, _s in (_run.source_stats or {}).items():
+        _row = _src_rows.get(_key)
+        if _row is None:  # first (newest) sighting sets current health + last run
+            _row = {"source": _key, "health": _s.get("health", "—"),
+                    "yield": 0, "last_success": None, "last_run": _when}
+            _src_rows[_key] = _row
+        _row["yield"] += int(_s.get("kept", 0) or 0)
+        if _row["last_success"] is None and int(_s.get("found", 0) or 0) > 0:
+            _row["last_success"] = _when
+
+
+def _fmt_dt(value) -> str:
+    return value.strftime("%Y-%m-%d %H:%M") if isinstance(value, _dt.datetime) else "—"
+
+
+if not _src_rows:
+    st.caption("لسه مفيش بيانات per-source — هتتسجّل تلقائيًا بعد أول بحث.")
+else:
+    health_df = pd.DataFrame(
+        [
+            {
+                "المصدر / Source": r["source"],
+                "الحالة / Health": _HEALTH_BADGE.get(r["health"], r["health"]),
+                "Yield (kept)": r["yield"],
+                "آخر نجاح / Last success": _fmt_dt(r["last_success"]),
+                "آخر تشغيل / Last run": _fmt_dt(r["last_run"]),
+            }
+            for r in _src_rows.values()
+        ]
+    ).sort_values("المصدر / Source").set_index("المصدر / Source")
+    st.dataframe(health_df, use_container_width=True)
+
+    _bad = [r["source"] for r in _src_rows.values() if r["health"] in ("blocked", "error")]
+    _empty = [r["source"] for r in _src_rows.values() if r["health"] == "empty"]
+    if _bad:
+        st.error("🔴 مصادر فيها مشكلة في آخر تشغيل / failing: " + "، ".join(_bad))
+    if _empty:
+        st.warning("🟡 مصادر رجّعت صفر في آخر تشغيل / empty: " + "، ".join(_empty))
 
 st.divider()
 col_a, col_b = st.columns(2)

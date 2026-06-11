@@ -21,10 +21,12 @@ from bs4 import BeautifulSoup
 from ..scrapers.http import (
     extract_emails_from_html,
     extract_phones,
+    extract_social_links,
     extract_whatsapp_numbers,
     fetch_html,
 )
-from .intelligence import classify_company
+from .contacts import extract_contacts
+from .intelligence import classify_company, detect_store_platform
 from .markets import detect_markets
 
 # Contact-ish pages first — that's where real numbers/emails live.
@@ -46,6 +48,12 @@ class WebsiteIntel:
     whatsapp: list[str] = field(default_factory=list)
     markets: list[str] = field(default_factory=list)
     pages_crawled: int = 0
+    facebook: Optional[str] = None
+    linkedin: Optional[str] = None
+    store_platform: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_role: Optional[str] = None
+    contact_email: Optional[str] = None
 
 
 def discover_subpages(home_html: str, base_url: str, limit: int = 3) -> list[str]:
@@ -103,6 +111,7 @@ def crawl_website(
     emails: list[str] = []
     phones: list[str] = []
     whatsapp: list[str] = []
+    socials: dict = {}
     for h in htmls:
         for email in extract_emails_from_html(h):
             if email not in emails:
@@ -113,6 +122,12 @@ def crawl_website(
         for wa in extract_whatsapp_numbers(h, region):
             if wa not in whatsapp:
                 whatsapp.append(wa)
+        for net, url in extract_social_links(h).items():
+            socials.setdefault(net, url)
+
+    # Platform fingerprints live in the raw markup (myshopify, wp-content, …).
+    store_platform = detect_store_platform(" ".join(htmls))
+    contact = extract_contacts(text, emails)
 
     markets = detect_markets(text)
     non_local = [m for m in markets if not m.startswith("Local")]
@@ -122,10 +137,16 @@ def crawl_website(
         company_type=intel.company_type,
         shipping_intent=intent,
         signals=intel.signals,
-        has_online_store=intel.has_online_store,
+        has_online_store=intel.has_online_store or bool(store_platform),
         emails=emails,
         phones=phones,
         whatsapp=whatsapp,
         markets=markets,
         pages_crawled=len(htmls),
+        facebook=socials.get("facebook"),
+        linkedin=socials.get("linkedin"),
+        store_platform=store_platform,
+        contact_name=contact.get("name"),
+        contact_role=contact.get("role"),
+        contact_email=contact.get("email"),
     )

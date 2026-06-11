@@ -8,14 +8,16 @@ def test_parse_listing(fixtures_dir):
 
     assert len(leads) == 2
     first = leads[0]
-    assert first.company_name == "Alex Cargo Services"
+    assert first.company_name == "Aquacity water logistics"
     assert first.source == "wsdconnect"
-    assert first.email == "info@alexcargo.example"
-    assert first.website == "https://alexcargo.example"
-    assert first.city == "Alexandria"
-    assert first.country == "Egypt"
-    assert first.source_url.endswith("/listings/alex-cargo/freight-forwarding")
-    assert first.category == "Freight Forwarding"
+    assert first.email == "info@aquacitygroups.net"
+    assert first.website == "https://www.aquacitygroups.net"
+    # location is the first .listing-item only — service tags / "+N more" ports
+    # in the later .listing-item rows must not leak into city/country.
+    assert first.city == "Gandhidham"
+    assert first.country == "India"
+    assert first.source_url.endswith("/listings/aquacity-water-logistics/cha-services")
+    assert first.category == "CHA Services"
 
 
 def test_detail_phone_extraction(fixtures_dir):

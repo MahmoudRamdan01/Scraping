@@ -16,6 +16,7 @@ a blocked or empty run yields nothing rather than crashing the whole search.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Iterator, Optional
 
@@ -65,13 +66,32 @@ class GoogleMapsScraper(BaseScraper):
     label = "Google Maps (business listings)"
     tier = "yellow"
 
+    # Conservative defaults (verified live). The autopilot can lower these via env
+    # (AOL_MAPS_*) to trade a little recall for a lot of speed across many queries.
     SCROLL_ROUNDS = 8
     SCROLL_PAUSE_MS = 1600
     DETAIL_PAUSE_MS = 1500
+    CONSENT_PAUSE_MS = 3500
+    NAV_TIMEOUT_MS = 45000
+    DETAIL_TIMEOUT_MS = 30000
+
+    def __init__(self, meta: Optional[dict] = None):
+        super().__init__(meta)
+
+        def _i(name: str, default: int) -> int:
+            try:
+                return int(os.environ.get(name, default))
+            except (TypeError, ValueError):
+                return default
+
+        self.scroll_rounds = _i("AOL_MAPS_SCROLL_ROUNDS", self.SCROLL_ROUNDS)
+        self.scroll_pause_ms = _i("AOL_MAPS_SCROLL_PAUSE_MS", self.SCROLL_PAUSE_MS)
+        self.detail_pause_ms = _i("AOL_MAPS_DETAIL_PAUSE_MS", self.DETAIL_PAUSE_MS)
+        self.consent_pause_ms = _i("AOL_MAPS_CONSENT_PAUSE_MS", self.CONSENT_PAUSE_MS)
+        self.nav_timeout_ms = _i("AOL_MAPS_NAV_TIMEOUT_MS", self.NAV_TIMEOUT_MS)
+        self.detail_timeout_ms = _i("AOL_MAPS_DETAIL_TIMEOUT_MS", self.DETAIL_TIMEOUT_MS)
 
     def _insecure(self) -> bool:
-        import os
-
         return str(os.environ.get("AOL_INSECURE_SSL", "false")).strip().lower() in {"1", "true", "yes", "on"}
 
     def search(self, req: SearchRequest) -> Iterator[RawLead]:
@@ -97,8 +117,8 @@ class GoogleMapsScraper(BaseScraper):
             )
             page = context.new_page()
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                page.wait_for_timeout(3500)
+                page.goto(url, wait_until="domcontentloaded", timeout=self.nav_timeout_ms)
+                page.wait_for_timeout(self.consent_pause_ms)
                 self._dismiss_consent(page)
                 place_urls = self._collect_place_urls(page, req.max_results)
 
@@ -131,7 +151,7 @@ class GoogleMapsScraper(BaseScraper):
 
     def _collect_place_urls(self, page, want: int) -> list[str]:
         seen: list[str] = []
-        for _ in range(self.SCROLL_ROUNDS):
+        for _ in range(self.scroll_rounds):
             for a in page.query_selector_all("a[href*='/maps/place/']"):
                 href = a.get_attribute("href")
                 if href and href not in seen:
@@ -142,13 +162,13 @@ class GoogleMapsScraper(BaseScraper):
                 page.eval_on_selector("div[role='feed']", "el => el.scrollTo(0, el.scrollHeight)")
             except Exception:  # noqa: BLE001 - feed not present yet
                 pass
-            page.wait_for_timeout(self.SCROLL_PAUSE_MS)
+            page.wait_for_timeout(self.scroll_pause_ms)
         return seen[: max(want, 0)]
 
     def _scrape_place(self, page, place_url: str, req: SearchRequest) -> Optional[RawLead]:
         try:
-            page.goto(place_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(self.DETAIL_PAUSE_MS)
+            page.goto(place_url, wait_until="domcontentloaded", timeout=self.detail_timeout_ms)
+            page.wait_for_timeout(self.detail_pause_ms)
         except Exception:  # noqa: BLE001 - skip a bad place
             return None
 

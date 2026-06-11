@@ -25,6 +25,9 @@ scraping = ["playwright>=1.44", "playwright-stealth>=1.0.6"]
 sheets = ["gspread>=6.0", "google-auth>=2.30"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
+[project.scripts]
+aol-autopilot = "aol_leadfinder.autopilot:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

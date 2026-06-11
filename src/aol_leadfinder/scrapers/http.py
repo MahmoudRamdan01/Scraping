@@ -7,13 +7,18 @@ returns only valid E.164 numbers (WhatsApp/tel first). This avoids the classic
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import random
 import re
+import time
+from pathlib import Path
 from typing import Optional
 
 import phonenumbers
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 
 HEADERS = {
     "User-Agent": (
@@ -25,6 +30,8 @@ HEADERS = {
 
 _PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,}\d)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# Cloudflare email obfuscation: <a data-cfemail="HEX">, first byte = XOR key.
+_CF_EMAIL_RE = re.compile(r'data-cfemail="([0-9a-fA-F]{6,})"')
 # wa.me/<num>, api.whatsapp.com/send?phone=<num>, whatsapp://send?phone=<num>
 _WHATSAPP_RE = re.compile(
     r"(?:wa\.me/|whatsapp\.com/send\?phone=|whatsapp://send\?phone=)\+?(\d{6,15})", re.I
@@ -43,16 +50,132 @@ def _insecure_default() -> bool:
     return str(os.environ.get("AOL_INSECURE_SSL", "false")).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def fetch_html(url: str, timeout: int = 20, verify: Optional[bool] = None) -> str:
+# HTTP statuses worth a retry: rate-limit + transient server errors. A 4xx like
+# 404/403 is terminal (the page won't appear by asking again), so it fails fast.
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+# ---- Optional connection pooling + on-disk cache (both env-gated, OFF by default) ----
+# When AOL_HTTP_POOL is unset the GET goes through a bare ``requests.get`` exactly as
+# before, so the retry tests (which patch ``http.requests.get``) are unaffected. The
+# pool + cache only activate for the autopilot / concurrent runs that set the env vars.
+_SESSION: Optional[requests.Session] = None
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _session() -> requests.Session:
+    """Lazily build a shared, thread-safe Session with a connection pool."""
+    global _SESSION
+    if _SESSION is None:
+        sess = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        sess.mount("http://", adapter)
+        sess.mount("https://", adapter)
+        _SESSION = sess
+    return _SESSION
+
+
+def _do_get(url: str, **kwargs):
+    """One GET: pooled Session when AOL_HTTP_POOL is set, else a bare requests.get."""
+    if _env_flag("AOL_HTTP_POOL"):
+        return _session().get(url, **kwargs)
+    return requests.get(url, **kwargs)
+
+
+def _cache_dir() -> Optional[Path]:
+    d = os.environ.get("AOL_HTTP_CACHE_DIR")
+    return Path(d) if d else None
+
+
+def _cache_ttl() -> float:
+    try:
+        return float(os.environ.get("AOL_HTTP_CACHE_TTL", "86400"))
+    except (TypeError, ValueError):
+        return 86400.0
+
+
+def _cache_file(cache_dir: Path, url: str) -> Path:
+    return cache_dir / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".html")
+
+
+def _cache_read(url: str) -> Optional[str]:
+    cdir = _cache_dir()
+    if not cdir:
+        return None
+    path = _cache_file(cdir, url)
+    try:
+        if path.exists() and (time.time() - path.stat().st_mtime) < _cache_ttl():
+            return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return None
+
+
+def _cache_write(url: str, text: str) -> None:
+    cdir = _cache_dir()
+    if not cdir:
+        return
+    try:
+        cdir.mkdir(parents=True, exist_ok=True)
+        _cache_file(cdir, url).write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def fetch_html(
+    url: str,
+    timeout: int = 20,
+    verify: Optional[bool] = None,
+    *,
+    retries: int = 3,
+    backoff_base: float = 1.5,
+) -> str:
+    """GET ``url`` and return its HTML, retrying only *transient* failures.
+
+    Network errors, timeouts, and retryable HTTP statuses (429/5xx) are retried up
+    to ``retries`` times with exponential backoff + jitter; non-retryable client
+    errors (404/403/…) fail fast. Every scraper goes through this single function,
+    so the resilience is inherited centrally instead of reimplemented per source.
+    The success (200) path is a single request with zero added overhead.
+    """
     if verify is None:
         verify = not _insecure_default()
     if not verify:
         import urllib3
 
         urllib3.disable_warnings()
-    resp = requests.get(url, headers=HEADERS, timeout=timeout, verify=verify)
-    resp.raise_for_status()
-    return resp.text
+
+    cached = _cache_read(url)
+    if cached is not None:
+        return cached
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        try:
+            resp = _do_get(url, headers=HEADERS, timeout=timeout, verify=verify)
+        except requests.RequestException as exc:
+            # Connection reset, DNS failure, timeout, etc.
+            last_exc = exc
+            if attempt >= retries:
+                raise
+            time.sleep(backoff_base ** attempt + random.uniform(0, 0.5))
+            continue
+
+        if resp.status_code in _RETRY_STATUS and attempt < retries:
+            last_exc = requests.HTTPError(f"{resp.status_code} Server Error for url: {url}", response=resp)
+            time.sleep(backoff_base ** attempt + random.uniform(0, 0.5))
+            continue
+
+        # 200 -> return; non-retryable 4xx or a final-attempt 5xx -> raise here
+        # (outside the network except, so HTTPError is never re-caught as transient).
+        resp.raise_for_status()
+        _cache_write(url, resp.text)
+        return resp.text
+
+    raise last_exc if last_exc is not None else RuntimeError(f"fetch_html failed for {url}")
 
 
 def best_e164(raw: str, region: str = "EG") -> Optional[str]:
@@ -127,4 +250,53 @@ def extract_emails_from_html(html: str) -> list[str]:
         add(a["href"][7:].split("?")[0])
     for match in _EMAIL_RE.findall(soup.get_text(" ", strip=True)):
         add(match)
+    for email in decode_cf_emails(html):
+        add(email)
+    return out
+
+
+# Facebook share/widget/tracking links that aren't the company's own page.
+_FB_SKIP = ("sharer", "share.php", "/plugins/", "/dialog/", "facebook.com/tr", "/login", "/events/")
+
+
+def _fb_has_handle(href: str) -> bool:
+    tail = href.split("facebook.com/", 1)[-1].split("?")[0].strip("/")
+    return bool(tail) and tail.lower() not in {"pages", "profile.php", "people"}
+
+
+def extract_social_links(html: str) -> dict:
+    """First Facebook + LinkedIn profile URL on the page (company pages, not widgets)."""
+    soup = BeautifulSoup(html, "lxml")
+    out: dict[str, str] = {}
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        low = href.lower()
+        if "facebook" not in out and "facebook.com/" in low:
+            if not any(s in low for s in _FB_SKIP) and _fb_has_handle(href):
+                out["facebook"] = href.split("?")[0]
+        elif "linkedin" not in out and ("linkedin.com/company/" in low or "linkedin.com/in/" in low):
+            out["linkedin"] = href.split("?")[0]
+        if "facebook" in out and "linkedin" in out:
+            break
+    return out
+
+
+def decode_cf_emails(html: str) -> list[str]:
+    """Recover Cloudflare-obfuscated emails (``data-cfemail`` hex).
+
+    Cloudflare replaces an email with a hex string whose first byte is an XOR
+    key for the remaining bytes. Many directories (e.g. council member pages)
+    hide emails this way, so decoding them keeps a real contact instead of the
+    ``[email protected]`` placeholder.
+    """
+    out: list[str] = []
+    for hexstr in _CF_EMAIL_RE.findall(html):
+        try:
+            raw = bytes.fromhex(hexstr)
+            key = raw[0]
+            email = "".join(chr(b ^ key) for b in raw[1:])
+        except (ValueError, IndexError):
+            continue
+        if "@" in email and email not in out:
+            out.append(email)
     return out

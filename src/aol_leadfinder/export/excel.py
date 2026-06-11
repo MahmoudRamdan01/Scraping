@@ -34,7 +34,17 @@ _COLUMNS = [
     ("assigned_to", "Assigned To", 14),
     ("next_followup_date", "Next Follow-up", 15),
     ("source", "Source", 16),
+    ("sources_seen", "All Sources", 24),
     ("source_url", "Source URL", 30),
+    # v2 — richer lead data (appended so existing columns keep their positions).
+    ("segment", "Segment", 10),
+    ("product_type", "Product Type", 18),
+    ("store_platform", "Store", 12),
+    ("facebook", "Facebook", 28),
+    ("linkedin", "LinkedIn", 28),
+    ("contact_name", "Contact Name", 18),
+    ("contact_role", "Contact Role", 16),
+    ("contact_email", "Contact Email", 24),
 ]
 
 # Columns rendered as clickable hyperlinks: header -> URL builder.
@@ -42,6 +52,8 @@ _LINK_COLUMNS = {
     "Website": lambda v: v if str(v).startswith("http") else f"https://{v}",
     "Source URL": lambda v: v,
     "WhatsApp": lambda v: f"https://wa.me/{str(v).lstrip('+')}",
+    "Facebook": lambda v: v if str(v).startswith("http") else f"https://{v}",
+    "LinkedIn": lambda v: v if str(v).startswith("http") else f"https://{v}",
 }
 
 _HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
