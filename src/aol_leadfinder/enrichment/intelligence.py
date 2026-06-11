@@ -73,6 +73,27 @@ _TYPE_BASE_INTENT = {
 
 _ECOMMERCE_MARKERS = ["shopify.shop", "/cart", "woocommerce", "add to cart", "shop now", "salla", "zid"]
 
+# E-commerce platform fingerprints (name -> markers). First match wins. Knowing the
+# platform tells the sales team the shipping/fulfilment profile (D2C, frequent
+# parcels) at a glance.
+_STORE_PLATFORMS: list[tuple[str, tuple[str, ...]]] = [
+    ("Shopify", ("myshopify.com", "cdn.shopify", "shopify.shop", "powered by shopify")),
+    ("WooCommerce", ("woocommerce", "wp-content/plugins/woocommerce", "wc-ajax")),
+    ("Salla", ("salla.sa", "salla.shop", "cdn.salla", "متجر سلة")),
+    ("Zid", ("zid.store", "zid.sa", "متجر زد")),
+    ("Magento", ("magento", "/static/version", "mage/cookies")),
+    ("WordPress", ("wp-content", "wp-json")),
+]
+
+
+def detect_store_platform(text: Optional[str]) -> Optional[str]:
+    """Identify the e-commerce platform from page text/markup, or None."""
+    t = (text or "").lower()
+    for name, markers in _STORE_PLATFORMS:
+        if any(m in t for m in markers):
+            return name
+    return None
+
 
 @dataclass
 class CompanyIntel:

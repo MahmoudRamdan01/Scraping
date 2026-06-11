@@ -255,6 +255,32 @@ def extract_emails_from_html(html: str) -> list[str]:
     return out
 
 
+# Facebook share/widget/tracking links that aren't the company's own page.
+_FB_SKIP = ("sharer", "share.php", "/plugins/", "/dialog/", "facebook.com/tr", "/login", "/events/")
+
+
+def _fb_has_handle(href: str) -> bool:
+    tail = href.split("facebook.com/", 1)[-1].split("?")[0].strip("/")
+    return bool(tail) and tail.lower() not in {"pages", "profile.php", "people"}
+
+
+def extract_social_links(html: str) -> dict:
+    """First Facebook + LinkedIn profile URL on the page (company pages, not widgets)."""
+    soup = BeautifulSoup(html, "lxml")
+    out: dict[str, str] = {}
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        low = href.lower()
+        if "facebook" not in out and "facebook.com/" in low:
+            if not any(s in low for s in _FB_SKIP) and _fb_has_handle(href):
+                out["facebook"] = href.split("?")[0]
+        elif "linkedin" not in out and ("linkedin.com/company/" in low or "linkedin.com/in/" in low):
+            out["linkedin"] = href.split("?")[0]
+        if "facebook" in out and "linkedin" in out:
+            break
+    return out
+
+
 def decode_cf_emails(html: str) -> list[str]:
     """Recover Cloudflare-obfuscated emails (``data-cfemail`` hex).
 

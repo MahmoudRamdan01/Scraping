@@ -120,10 +120,24 @@ def _enrich_website(norm, region: str = "EG") -> None:
         norm.shipping_intent = max(norm.shipping_intent or 0, intel.shipping_intent)
     if intel.has_online_store:
         norm.has_online_store = True
+    if intel.store_platform and not norm.store_platform:
+        norm.store_platform = intel.store_platform
     if intel.markets:
         norm.target_markets = intel.markets
     if not norm.email and intel.emails:
         norm.email = intel.emails[0]
+    # Discovery channels + decision-maker contact (fill-if-blank).
+    if intel.facebook and not norm.facebook:
+        norm.facebook = intel.facebook
+    if intel.linkedin and not norm.linkedin:
+        norm.linkedin = intel.linkedin
+        links = dict(norm.social_links or {})
+        links.setdefault("linkedin", intel.linkedin)
+        norm.social_links = links
+    if intel.contact_role and not norm.contact_role:
+        norm.contact_name = intel.contact_name
+        norm.contact_role = intel.contact_role
+        norm.contact_email = intel.contact_email or norm.contact_email
 
     # Phones: website is authoritative. Merge directory + website, keep all valid.
     site_phones = intel.phones  # already validated E.164, contact-page first
@@ -183,6 +197,8 @@ def _process_raw(
     if enrich and norm.website:
         _enrich_website(norm, settings.default_region)
     norm.is_competitor = norm.is_competitor or (norm.company_type == "Freight Forwarder")
+    if not norm.product_type and norm.category:
+        norm.product_type = norm.category  # the searched category is the product type
     # Structural validation BEFORE quality filters: broken data (no identity /
     # no contact / bad phone) is quarantined — kept for review, excluded from the
     # working list — never silently dropped and never allowed to pollute real leads.

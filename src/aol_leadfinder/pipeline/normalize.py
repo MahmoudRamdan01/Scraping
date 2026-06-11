@@ -50,11 +50,32 @@ def normalize_name(name: Optional[str]) -> str:
     return _WS.sub(" ", s).strip()
 
 
+_EMAIL_SHAPE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$")
+_DOUBLED_TLD = re.compile(r"(\.[a-z]{2,6})\1$")  # ".com.com" -> ".com"
+_EMAIL_JUNK = ("noreply", "no-reply", "example.com", "example.org", "sentry", "wixpress")
+_EMAIL_SPLIT = re.compile(r"[\s,;|]+")
+
+
 def _clean_email(email: Optional[str]) -> Optional[str]:
+    """Normalise a possibly-dirty source email to a single valid address.
+
+    Fixes the real-world breakage seen in the wild: URL-encoded leading space
+    (``%20info@…``), a doubled TLD (``sales@x.com.com``), and several addresses
+    crammed into one cell (``a@x.com | b@y.net``) — returns the first clean one.
+    """
     if not email:
         return None
-    e = str(email).strip().lower()
-    return e if "@" in e and "." in e.split("@")[-1] else None
+    raw = str(email).replace("%20", " ").strip().lower()
+    for token in _EMAIL_SPLIT.split(raw):
+        token = token.strip().strip(".")
+        if "@" not in token:
+            continue
+        local, _, domain = token.partition("@")
+        domain = _DOUBLED_TLD.sub(r"\1", domain)
+        candidate = f"{local}@{domain}"
+        if _EMAIL_SHAPE.match(candidate) and not any(j in candidate for j in _EMAIL_JUNK):
+            return candidate
+    return None
 
 
 @dataclass

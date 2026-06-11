@@ -1,10 +1,21 @@
 from aol_leadfinder.pipeline.normalize import (
+    _clean_email,
     normalize_domain,
     normalize_lead,
     normalize_name,
     normalize_phone,
 )
 from aol_leadfinder.scrapers.base import RawLead
+
+
+def test_clean_email_fixes_real_world_breakage():
+    assert _clean_email("INFO@Nile.example") == "info@nile.example"
+    assert _clean_email("%20info@makkacorp.com") == "info@makkacorp.com"   # url-encoded space
+    assert _clean_email("sales@dubaigateeg.com.com") == "sales@dubaigateeg.com"  # doubled TLD
+    assert _clean_email("cs@ecc.com | export@ecc-eg.net") == "cs@ecc.com"   # multi-email cell
+    assert _clean_email("noreply@x.com") is None                            # role junk
+    assert _clean_email("not-an-email") is None
+    assert _clean_email(None) is None
 
 
 def test_normalize_phone_egyptian_formats():
