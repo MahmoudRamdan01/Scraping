@@ -1,0 +1,78 @@
+name: Autopilot
+
+# Unattended daily lead run. Scrapes the rotating priority slice, enriches +
+# scores, then APPENDS only new leads to the Sales_Review Google Sheet.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   GOOGLE_SHEETS_CRED_JSON  the service-account JSON (paste the whole file)
+#   GOOGLE_SHEET_ID          the spreadsheet id (the 19EXC... part of its URL)
+# and share the sheet with the service-account email as Editor.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily (~08:00 Cairo)
+  workflow_dispatch:       # manual "Run workflow" button
+    inputs:
+      dry_run:
+        description: "Scrape + score but do NOT write to the sheet"
+        type: boolean
+        default: false
+
+concurrency:
+  group: autopilot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[scraping,sheets]"
+          python -m playwright install --with-deps chromium
+
+      # Persist the SQLite DB + HTTP cache across runs (speed only; the Sheet is the
+      # durable de-dup authority, so a cache miss never causes duplicate rows).
+      - name: Restore data + cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data
+            .http_cache
+          key: autopilot-store-${{ github.run_id }}
+          restore-keys: |
+            autopilot-store-
+
+      - name: Run autopilot
+        env:
+          GOOGLE_SHEETS_CRED_JSON: ${{ secrets.GOOGLE_SHEETS_CRED_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          AOL_MAX_WORKERS: "6"
+          AOL_HTTP_POOL: "1"
+          AOL_HTTP_CACHE_DIR: ".http_cache"
+          # Lean Google Maps timings for CI (it may still be blocked from data-center IPs).
+          AOL_MAPS_SCROLL_ROUNDS: "4"
+          AOL_MAPS_SCROLL_PAUSE_MS: "900"
+          AOL_MAPS_DETAIL_PAUSE_MS: "900"
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            aol-autopilot --dry-run
+          else
+            aol-autopilot
+          fi
+
+      - name: Upload leads database (for download/backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-db
+          path: data/leads.db
+          if-no-files-found: ignore
