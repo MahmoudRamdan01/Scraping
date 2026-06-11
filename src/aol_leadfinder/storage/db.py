@@ -17,6 +17,8 @@ _MERGE_FIELDS = (
     "phone_e164", "phone_raw", "email", "website", "domain", "address", "city",
     "governorate", "country", "category", "description", "source", "source_url",
     "followers", "last_activity_date", "rating", "branches", "has_online_store",
+    "facebook", "linkedin", "store_platform",
+    "contact_name", "contact_role", "contact_email",
 )
 _EMPTY = (None, "", [])
 
@@ -33,6 +35,17 @@ _MIGRATION_COLUMNS = {
     "enriched": "INTEGER",
     "sources_seen": "TEXT",
     "quarantine_reason": "TEXT",
+    # v2 — richer lead data + autopilot sheet-sync tracking.
+    "facebook": "TEXT",
+    "linkedin": "TEXT",
+    "store_platform": "TEXT",
+    "product_type": "TEXT",
+    "segment": "TEXT",
+    "contact_name": "TEXT",
+    "contact_role": "TEXT",
+    "contact_email": "TEXT",
+    "pushed_to_sheet": "INTEGER",
+    "sheet_synced_at": "TEXT",
 }
 
 # Columns added to the run table after v1 (Sprint A per-source observability).
@@ -140,6 +153,10 @@ def upsert_lead(
         existing.score_reasons = n.score_reasons or None
         if n.company_type:
             existing.company_type = n.company_type
+        if n.product_type:
+            existing.product_type = n.product_type
+        if n.segment:
+            existing.segment = n.segment
         if n.shipping_intent is not None:
             existing.shipping_intent = n.shipping_intent
         if n.target_markets:
@@ -169,15 +186,23 @@ def upsert_lead(
         source_url=n.source_url,
         sources_seen=_merge_sources_seen(None, n.source),
         social_links=(n.social_links or None),
+        facebook=n.facebook,
+        linkedin=n.linkedin,
         followers=n.followers,
         last_activity_date=n.last_activity_date,
         rating=n.rating,
         branches=n.branches,
         has_online_store=n.has_online_store,
+        store_platform=n.store_platform,
         company_type=n.company_type,
+        product_type=n.product_type,
+        segment=n.segment,
         shipping_intent=n.shipping_intent,
         target_markets=(n.target_markets or None),
         enriched=n.enriched,
+        contact_name=n.contact_name,
+        contact_role=n.contact_role,
+        contact_email=n.contact_email,
         score=n.score,
         tier=n.tier,
         score_reasons=(n.score_reasons or None),

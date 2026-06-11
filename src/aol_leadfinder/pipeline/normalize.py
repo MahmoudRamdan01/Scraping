@@ -76,15 +76,24 @@ class NormalizedLead:
     category: Optional[str] = None
     description: Optional[str] = None
     social_links: dict = field(default_factory=dict)
+    facebook: Optional[str] = None
+    linkedin: Optional[str] = None
     followers: Optional[int] = None
     last_activity_date: Optional[date] = None
     rating: Optional[float] = None
     branches: Optional[int] = None
     has_online_store: Optional[bool] = None
+    store_platform: Optional[str] = None
     company_type: Optional[str] = None
+    product_type: Optional[str] = None
+    segment: Optional[str] = None
+    is_competitor: bool = False
     shipping_intent: Optional[int] = None
     target_markets: list = field(default_factory=list)
     enriched: bool = False
+    contact_name: Optional[str] = None
+    contact_role: Optional[str] = None
+    contact_email: Optional[str] = None
     score: int = 0
     tier: str = "Weak"
     score_reasons: list = field(default_factory=list)
@@ -110,6 +119,8 @@ def normalize_lead(raw: RawLead, *, default_country: str = "Egypt", region: str 
     if website and "://" not in website:
         website = "https://" + website
 
+    social = raw.social_links or {}
+
     return NormalizedLead(
         company_name=company,
         company_name_norm=normalize_name(company),
@@ -127,7 +138,9 @@ def normalize_lead(raw: RawLead, *, default_country: str = "Egypt", region: str 
         country=raw.country or default_country,
         category=raw.category,
         description=raw.description,
-        social_links=raw.social_links or {},
+        social_links=social,
+        facebook=social.get("facebook"),
+        linkedin=social.get("linkedin"),
         followers=raw.followers,
         last_activity_date=raw.last_activity_date,
         rating=raw.rating,

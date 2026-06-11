@@ -63,17 +63,27 @@ class Lead(SQLModel, table=True):
     source_url: Optional[str] = None
     sources_seen: Optional[str] = None  # comma-joined union of every source that contributed
     social_links: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    facebook: Optional[str] = None
+    linkedin: Optional[str] = None
 
     followers: Optional[int] = None
     last_activity_date: Optional[date] = None
     rating: Optional[float] = None
     branches: Optional[int] = None
     has_online_store: Optional[bool] = None
+    store_platform: Optional[str] = None  # Shopify / WooCommerce / Salla / Zid
 
     company_type: Optional[str] = None
+    product_type: Optional[str] = None
+    segment: Optional[str] = None  # P1 / P2 / P3 / service / competitor / other
     shipping_intent: Optional[int] = None
     target_markets: Optional[list] = Field(default=None, sa_column=Column(JSON))
     enriched: bool = False
+
+    # Best-effort decision-maker contact (export > logistics > owner/CEO).
+    contact_name: Optional[str] = None
+    contact_role: Optional[str] = None
+    contact_email: Optional[str] = None
 
     score: int = 0
     tier: str = "Weak"
@@ -86,6 +96,10 @@ class Lead(SQLModel, table=True):
     assigned_to: Optional[str] = None
     last_contact_date: Optional[date] = None
     next_followup_date: Optional[date] = None
+
+    # Google Sheet append-only sync tracking (owned by sheets_sync, not the merge).
+    pushed_to_sheet: bool = False
+    sheet_synced_at: Optional[datetime] = None
 
     run_id: Optional[int] = Field(default=None, foreign_key="run.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
